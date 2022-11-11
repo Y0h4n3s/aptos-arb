@@ -1,0 +1,11 @@
+[package]
+name = "garb_aptos"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+garb_sync_aptos = { path = "../sync" }
+garb_graph_aptos = { path = "../graph" }
+tokio = "1.17.0"
+anyhow = "1.0.66"
+async-std = "1.12.0"
