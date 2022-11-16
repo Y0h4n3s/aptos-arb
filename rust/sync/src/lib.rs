@@ -14,6 +14,7 @@ use async_std::sync::Arc;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use tokio::sync::mpsc::Sender;
 use tokio::sync::RwLock;
 use url::Url;
 
@@ -46,12 +47,18 @@ pub struct LiquidityProvider {
 
 #[derive(Debug, Clone, PartialOrd, PartialEq, Eq, Hash)]
 pub enum LiquidityProviders {
-    LiquidSwap,
-    Aux,
-    AnimeSwap,
-    Aptoswap,
-    Cetue,
-    PancakeSwap,
+    Hippo = 1,
+    Econia = 2,
+    LiquidSwap = 3,
+    Basiq = 4,
+    Ditto = 5,
+    Tortuga = 6,
+    Aptoswap = 7,
+    Aux = 8,
+    AnimeSwap = 9,
+    Cetue = 10,
+    PancakeSwap = 11,
+    Obric = 12
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -63,6 +70,7 @@ pub struct Pool {
     pub y_amount: u64,
     pub provider: LiquidityProvider,
     pub events_sources: Vec<IEventHandle>,
+    pub x_to_y: bool,
 }
 
 impl Pool {
@@ -81,6 +89,7 @@ impl From<&Pool> for Pool {
             y_amount: pool.y_amount,
             provider: pool.provider.clone(),
             events_sources: pool.events_sources.clone(),
+            x_to_y: pool.x_to_y,
         }
     }
 }
@@ -151,16 +160,16 @@ static PROVIDERS: Lazy<Vec<LiquidityProvider>> = Lazy::new(|| {
             events_name: None,
             event_has_types: true,
         },
-        LiquidityProvider {
-            contract_address: String::from(LIQUIDSWAP_CONTRACT),
-            resource_address: Some(String::from(LIQUIDSWAP_RESOURCE)),
-            id: LiquidityProviders::LiquidSwap,
-            pool_module: String::from("liquidity_pool"),
-            pool_name: String::from("LiquidityPool"),
-            events_module: Some(String::from("liquidity_pool")),
-            events_name: Some(String::from("EventsStore")),
-            event_has_types: true,
-        },
+        // LiquidityProvider {
+        //     contract_address: String::from(LIQUIDSWAP_CONTRACT),
+        //     resource_address: Some(String::from(LIQUIDSWAP_RESOURCE)),
+        //     id: LiquidityProviders::LiquidSwap,
+        //     pool_module: String::from("liquidity_pool"),
+        //     pool_name: String::from("LiquidityPool"),
+        //     events_module: Some(String::from("liquidity_pool")),
+        //     events_name: Some(String::from("EventsStore")),
+        //     event_has_types: true,
+        // },
         LiquidityProvider {
             contract_address: String::from(AUX_CONTRACT),
             resource_address: None,
@@ -186,7 +195,7 @@ static PROVIDERS: Lazy<Vec<LiquidityProvider>> = Lazy::new(|| {
 
 pub async fn start(
     pools: Arc<RwLock<HashMap<String, Pool>>>,
-    updated_q: Arc<RwLock<VecDeque<Pool>>>,
+    updated_q: Arc<Sender<Pool>>,
 ) -> anyhow::Result<tokio::task::JoinHandle<()>> {
     let aptos_client = Arc::new(Client::new_with_timeout(
         NODE_URL.clone(),
@@ -255,7 +264,7 @@ pub async fn start(
 
 async fn poll_events(
     pools: Arc<RwLock<HashMap<String, Pool>>>,
-    updated_q: Arc<RwLock<VecDeque<Pool>>>,
+    updated_q: Arc<Sender<Pool>>,
     aptos_client: Arc<Client>,
 ) {
     let pr = pools.read().await.clone();
@@ -288,12 +297,20 @@ async fn poll_events(
                         .await;
 
                     if let Ok(response) = new_event {
+                        
+                        
                         if response.inner().len() > 0 {
                             let event = response.inner().get(0).unwrap();
+                            if last_sequence_number.is_none() {
+                                last_sequence_number = Some(event.sequence_number.0 + 1);
+                                continue;
+                            }
                             last_sequence_number = Some(event.sequence_number.0 + 1);
-                            let mut w = update_q.write().await;
-                            w.push_back(pl.clone());
-                            std::mem::drop(w);
+                            println!("sync> updates_queued: {:?}", update_q.max_capacity() - update_q.capacity());
+                            update_q.send(pl.clone()).await.unwrap();
+                            // let mut w = update_q.write().await;
+                            // w.push_back(pl.clone());
+                            // std::mem::drop(w);
                         }
                     } else {
                         // eprintln!("{:?}", new_event.unwrap_err());
@@ -365,6 +382,7 @@ async fn register_provider_events(
                         y_amount: 0,
                         provider: provider.clone(),
                         events_sources: vec![],
+                        x_to_y: true
                     };
 
                     // Get the pool's event source from resources
@@ -489,6 +507,7 @@ async fn register_liquidswap_events(
                         y_amount: 0,
                         provider: provider.clone(),
                         events_sources: vec![],
+                        x_to_y: true
                     };
                     let i_events = vec![
                         "flashloan_handle",
