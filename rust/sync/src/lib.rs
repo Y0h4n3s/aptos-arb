@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::collections::vec_deque::VecDeque;
 use std::fmt::Display;
 use std::hash::Hash;
 use std::str::FromStr;
@@ -7,15 +6,13 @@ use std::time::Duration;
 
 use aptos_sdk::move_types::language_storage::StructTag;
 use aptos_sdk::move_types::language_storage::TypeTag;
-use aptos_sdk::rest_client::{ Client};
+use aptos_sdk::rest_client::Client;
 use aptos_sdk::types::account_address::AccountAddress;
 use aptos_sdk::types::event::EventKey;
 use async_std::sync::Arc;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use tokio::sync::mpsc::Sender;
-use tokio::sync::RwLock;
 use url::Url;
 
 const PANCAKESWAP_CONTRACT: &str =
@@ -58,7 +55,7 @@ pub enum LiquidityProviders {
     AnimeSwap = 9,
     Cetue = 10,
     PancakeSwap = 11,
-    Obric = 12
+    Obric = 12,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -160,16 +157,16 @@ static PROVIDERS: Lazy<Vec<LiquidityProvider>> = Lazy::new(|| {
             events_name: None,
             event_has_types: true,
         },
-        // LiquidityProvider {
-        //     contract_address: String::from(LIQUIDSWAP_CONTRACT),
-        //     resource_address: Some(String::from(LIQUIDSWAP_RESOURCE)),
-        //     id: LiquidityProviders::LiquidSwap,
-        //     pool_module: String::from("liquidity_pool"),
-        //     pool_name: String::from("LiquidityPool"),
-        //     events_module: Some(String::from("liquidity_pool")),
-        //     events_name: Some(String::from("EventsStore")),
-        //     event_has_types: true,
-        // },
+        LiquidityProvider {
+            contract_address: String::from(LIQUIDSWAP_CONTRACT),
+            resource_address: Some(String::from(LIQUIDSWAP_RESOURCE)),
+            id: LiquidityProviders::LiquidSwap,
+            pool_module: String::from("liquidity_pool"),
+            pool_name: String::from("LiquidityPool"),
+            events_module: Some(String::from("liquidity_pool")),
+            events_name: Some(String::from("EventsStore")),
+            event_has_types: true,
+        },
         LiquidityProvider {
             contract_address: String::from(AUX_CONTRACT),
             resource_address: None,
@@ -194,8 +191,8 @@ static PROVIDERS: Lazy<Vec<LiquidityProvider>> = Lazy::new(|| {
 });
 
 pub async fn start(
-    pools: Arc<RwLock<HashMap<String, Pool>>>,
-    updated_q: Arc<Sender<Pool>>,
+    pools: Arc<tokio::sync::RwLock<HashMap<String, Pool>>>,
+    updated_q: Arc<kanal::AsyncSender<Pool>>,
 ) -> anyhow::Result<tokio::task::JoinHandle<()>> {
     let aptos_client = Arc::new(Client::new_with_timeout(
         NODE_URL.clone(),
@@ -263,11 +260,11 @@ pub async fn start(
 }
 
 async fn poll_events(
-    pools: Arc<RwLock<HashMap<String, Pool>>>,
-    updated_q: Arc<Sender<Pool>>,
+    pools: Arc<tokio::sync::RwLock<HashMap<String, Pool>>>,
+    updated_q: Arc<kanal::AsyncSender<Pool>>,
     aptos_client: Arc<Client>,
 ) {
-    let pr = pools.read().await.clone();
+    let pr = pools.read().await;
     let mut total_events = 0;
     let mut event_listener_tasks = vec![];
     for (_, p) in pr.iter() {
@@ -297,8 +294,6 @@ async fn poll_events(
                         .await;
 
                     if let Ok(response) = new_event {
-                        
-                        
                         if response.inner().len() > 0 {
                             let event = response.inner().get(0).unwrap();
                             if last_sequence_number.is_none() {
@@ -306,29 +301,25 @@ async fn poll_events(
                                 continue;
                             }
                             last_sequence_number = Some(event.sequence_number.0 + 1);
-                            println!("sync> updates_queued: {:?}", update_q.max_capacity() - update_q.capacity());
-                            update_q.send(pl.clone()).await.unwrap();
-                            // let mut w = update_q.write().await;
-                            // w.push_back(pl.clone());
-                            // std::mem::drop(w);
+                            update_q.send(pl.clone()).await.unwrap_or(());
                         }
                     } else {
                         // eprintln!("{:?}", new_event.unwrap_err());
                     }
                     // TODO: Make this configurable
-                    //tokio::time::sleep(Duration::from_secs(5)).await;
+                    tokio::time::sleep(Duration::from_secs(5)).await;
                 }
             }));
         }
     }
-    
+
     println!("Polling {} event types on {} pools", total_events, pr.len());
     for task in event_listener_tasks {
         task.await.unwrap();
     }
 }
 async fn register_provider_events(
-    pools: Arc<RwLock<HashMap<String, Pool>>>,
+    pools: Arc<tokio::sync::RwLock<HashMap<String, Pool>>>,
     aptos_client: Arc<Client>,
     provider: LiquidityProvider,
     i_events: Vec<&str>,
@@ -382,7 +373,7 @@ async fn register_provider_events(
                         y_amount: 0,
                         provider: provider.clone(),
                         events_sources: vec![],
-                        x_to_y: true
+                        x_to_y: true,
                     };
 
                     // Get the pool's event source from resources
@@ -442,7 +433,7 @@ struct ILiquidswapPool {
 }
 
 async fn register_liquidswap_events(
-    pools: Arc<RwLock<HashMap<String, Pool>>>,
+    pools: Arc<tokio::sync::RwLock<HashMap<String, Pool>>>,
     aptos_client: Arc<Client>,
     provider: LiquidityProvider,
 ) {
@@ -507,7 +498,7 @@ async fn register_liquidswap_events(
                         y_amount: 0,
                         provider: provider.clone(),
                         events_sources: vec![],
-                        x_to_y: true
+                        x_to_y: true,
                     };
                     let i_events = vec![
                         "flashloan_handle",
