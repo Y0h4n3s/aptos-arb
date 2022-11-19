@@ -7,6 +7,40 @@ use petgraph::Undirected;
 use tokio::sync::RwLock;
 use garb_sync_aptos::Pool;
 
+// fn find_new_cycles(mut path: Vec<NodeIndex>, graph: &Graph<String, Pool, Undirected>, mut cycles: Vec<Vec<NodeIndex>>) -> Vec<Vec<NodeIndex>>   {
+//         let start_node = path.first().unwrap().clone();
+//         let mut next_node: Option<NodeIndex> = None;
+//         let mut sub = vec![];
+//
+//         for edge in graph.edge_indices() {
+//             let (node1, node2) = graph.edge_endpoints(edge).unwrap();
+//             if start_node == node1 || start_node == node2 {
+//
+//                 if node1 == start_node {
+//                     next_node = Some(node2);
+//                 } else {
+//                     next_node = Some(node1);
+//                 }
+//                 if !path.contains(&next_node.unwrap()) {
+//                     sub.push(next_node.unwrap());
+//                     sub.append(&mut path);
+//                     cycles.append(&mut find_new_cycles(sub.clone(), graph, cycles.clone()));
+//                 } else if path.len() > 2 && next_node.unwrap() == *path.last().unwrap() {
+//                     println!("cycle found: {:?}", path);
+//                     cycles.push( path.clone());
+//                 }
+//
+//             }
+//         }
+//     return cycles.clone()
+//
+// }
+//
+// pub fn cycles_through(graph: &Graph<String, Pool, Undirected>, node: &NodeIndex) -> Vec<Vec<NodeIndex>> {
+//     let mut cycles = vec![];
+//     find_new_cycles(vec![*node], graph, cycles)
+//
+// }
 pub async fn start(
     pools: Arc<RwLock<HashMap<String, Pool>>>,
     updated_q: kanal::AsyncReceiver<Pool>,
@@ -29,17 +63,17 @@ pub async fn start(
         "0x1000000fa32d122c18a6a31c009ce5e71674f22d06a581bb0a15575e6addadcc::usda::USDA", // partners USDA
         "0x0000000000000000000000000000000000000000000000000000000000000001::aptos_coin::AptosCoin" // APT
     ];
-
+    
     let mut the_graph: Graph<String, Pool, Undirected> = Graph::<String, Pool, Undirected>::new_undirected();
     let pr = pools.read().await;
     for (_, pool) in pr.iter() {
         // println!("Adding node {:?} {} {}", pool.provider.id,pool.x_address.clone(), pool.y_address.clone());
         let index1 = the_graph
-            .node_indices()
-            .find(|i| the_graph[*i] == pool.x_address.clone());
+              .node_indices()
+              .find(|i| the_graph[*i] == pool.x_address.clone());
         let index2 = the_graph
-            .node_indices()
-            .find(|i| the_graph[*i] == pool.y_address.clone());
+              .node_indices()
+              .find(|i| the_graph[*i] == pool.y_address.clone());
         let i1 = if index1.is_none() {
             the_graph.add_node(pool.x_address.clone())
         } else {
@@ -50,16 +84,16 @@ pub async fn start(
         } else {
             index2.unwrap()
         };
-
+        
         the_graph.update_edge(i1, i2, Pool::from(pool));
     }
     println!("Number of coins: {}", the_graph.node_count());
-
+    
     let mut checked_coin_indices: Vec<NodeIndex> = vec![];
     for checked_coin in checked_coins {
         if let Some(index) = the_graph
-            .node_indices()
-            .find(|i| the_graph[*i] == checked_coin)
+              .node_indices()
+              .find(|i| the_graph[*i] == checked_coin)
         {
             checked_coin_indices.push(index)
         } else {
@@ -71,10 +105,10 @@ pub async fn start(
     }
     
     
-    let mut path_lookup = HashMap::<Pool, HashSet<(String,Vec<Pool>)>>::new();
+    let mut path_lookup = HashMap::<Pool, HashSet<(String, Vec<Pool>)>>::new();
     for edge in the_graph.edge_indices() {
         let edge = the_graph.edge_weight(edge).unwrap();
-    
+        
         // maybe pop the last element and drain the rest to get only the latest event
         let index1 = the_graph
               .node_indices()
@@ -85,18 +119,17 @@ pub async fn start(
               .find(|i| the_graph[*i] == edge.y_address)
               .unwrap();
         // println!("graph service> Finding routes for {}", edge);
-    
-        let updated_nodes = vec![index1, index2];
-        let mut safe_paths: HashSet<(String,Vec<Pool>)> = HashSet::new();
-    
-        for node in updated_nodes {
         
+        let updated_nodes = vec![index1, index2];
+        let mut safe_paths: HashSet<(String, Vec<Pool>)> = HashSet::new();
+        
+        for node in updated_nodes {
             if checked_coin_indices.contains(&node) {
                 continue;
             }
             for checked_coin in &*checked_coin_indices {
                 let mut in_address = the_graph.node_weight(*checked_coin).unwrap().to_string();
-        
+                
                 // TODO: make max_intermediate_nodes and min_intermediate_nodes configurable
                 // find all the paths that lead to the current checked coin from the updated coin
                 // max_intermediate_nodes limits the number of swaps we make, it can be any number but the bigger
@@ -115,7 +148,7 @@ pub async fn start(
                         if i == j {
                             continue;
                         }
-                
+                        
                         // eg. assuming the checked coin is wormhole usdc and one of the coins in the updated pool  is apt
                         //     ni: [apt -> via aux -> usdd -> via liquidswap -> usdc]
                         //     for each nj: [[apt -> via animeswap -> usdc],[apt -> via aux -> mojo -> via aux -> usdc],...]
@@ -125,47 +158,59 @@ pub async fn start(
                         let mut p1 = ni.clone();
                         p1.reverse();
                         p1.pop();
-                
+                        
                         let new_path: Vec<&NodeIndex> = p1.iter().chain(nj).collect();
-                
+                        
                         if new_path.len() > 4 {
                             continue;
                         }
-                        // collect the pools between the coins
-                        let mut edge_path = vec![];
+                        // collect all the pools between the coins
+                        // permutate the edges
+                        let mut edge_paths: Vec<Vec<Pool>> = vec![];
                         for (i, node) in new_path.iter().enumerate() {
                             if i == 0 {
                                 continue;
                             }
-                            let edge = the_graph.find_edge(**node, *new_path[i - 1]);
-                            if let Some(edge) = edge {
-                                let mut pool = the_graph.edge_weight(edge).unwrap().clone();
-                                pool.x_to_y = pool.x_address == *in_address;
-                                in_address = if pool.x_to_y {
-                                    pool.y_address.clone()
-                                } else {
-                                    pool.x_address.clone()
-                                };
-                                edge_path.push(pool);
-                            } else {
-                                // There is no pool between the two paths continue
-                                // this should never happen
-                                println!(
-                                    "Route not found between {} and {}",
-                                    the_graph[**node],
-                                    the_graph[*new_path[i - 1]]
-                                );
-                                continue 'second;
+                            let edges = the_graph.edges_connecting(**node, *new_path[i - 1]);
+                            if edge_paths.len() <= 0 {
+                                for edge in edges.clone() {
+                                    let mut pool = edge.weight().clone();
+                                    pool.x_to_y = pool.x_address == in_address;
+                                    edge_paths.push(vec![pool]);
+                                }
+                                continue;
                             }
-                            ;
+                            if edges.clone().count() > 1 {
+    
+                                println!("edges: {:?}", edges.clone().count());
+                            }
+                            let mut new_edge_paths = vec![];
+                            let mut in_a = in_address.clone();
+                            for old_path in edge_paths {
+                                for edge in edges.clone() {
+                                    let mut pool = edge.weight().clone();
+                                    pool.x_to_y = pool.x_address == in_a;
+                                    in_a = if pool.x_to_y {
+                                        pool.y_address.clone()
+                                    } else {
+                                        pool.x_address.clone()
+                                    };
+                                    new_edge_paths.push(old_path.clone().into_iter().chain(vec![pool]).collect());
+                                }
+                            }
+                            edge_paths = new_edge_paths;
                         }
-                
-                        safe_paths.insert((in_address.clone(), edge_path));
+                        
+                        for edge_path in edge_paths {
+                            safe_paths.insert((in_address.clone(), edge_path));
+    
+                        }
                     }
                 }
             }
         }
         // use only paths that route through the updated pool
+        // println!("Total Paths for {:?}: {}", edge.address, safe_paths.len());
         safe_paths = safe_paths.into_iter().filter(|(_in, path)| {
             path.iter().any(|p| p.address == edge.address && p.x_address == edge.x_address && p.y_address == edge.y_address)
         }).collect();
@@ -173,10 +218,11 @@ pub async fn start(
         
         path_lookup.insert(Pool::from(edge), safe_paths);
         
+        
+        
+        
     }
-    
-    
-    println!("graph service> Done finding routes, Listening for updates...");
+    println!("graph service> Done finding routes, Listening for updates... {}", path_lookup.len());
     
     while let Ok(updated_market) = updated_q.recv().await {
         if let Some(market_routes) = path_lookup.get(&updated_market) {
@@ -188,9 +234,6 @@ pub async fn start(
         } else {
             eprintln!("graph service> No routes found for {}", updated_market);
         }
-        
-        
     }
     Ok(())
-
 }
