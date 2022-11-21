@@ -93,7 +93,7 @@ impl From<&Pool> for Pool {
 
 impl Display for Pool {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Pool {{ \n\tProvider: {:?}\n\tx_address: {}\n\ty_address: {}\n\tevents_sources: {:?}\n }}\n", self.provider.id, self.x_address, self.y_address,  self.events_sources.len())
+        write!(f, "Pool {{ \n\tProvider: {:?}\n\taddress: {}\n\tx_address: {}\n\ty_address: {}\n\tis_x_to_y: {}\n\tevents_sources: {:?}\n }}\n", self.provider.id, self.address,self.x_address, self.y_address,  self.x_to_y,self.events_sources.len())
     }
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -205,31 +205,31 @@ pub async fn start(
             LiquidityProviders::Aux => {
                 vec![
                     "swap_events",
-                    "add_liquidity_events",
-                    "remove_liquidity_events",
+                    //"add_liquidity_events",
+                    //"remove_liquidity_events",
                 ]
             }
 
             LiquidityProviders::AnimeSwap => {
-                vec!["swap_event", "flash_swap_event", "remove_liquidity_events"]
+                vec!["swap_event", /*"flash_swap_event", "remove_liquidity_events"*/]
             }
 
             LiquidityProviders::Aptoswap => {
                 vec![
-                    "liquidity_event",
+                    //"liquidity_event",
                     "swap_token_event",
-                    "remove_liquidity_events",
+                    //"remove_liquidity_events",
                 ]
             }
             LiquidityProviders::Cetue => {
                 vec![
-                    "add_liquidity_events",
-                    "remove_liquidity_events",
+                    //"add_liquidity_events",
+                    //"remove_liquidity_events",
                     "swap_events",
                 ]
             }
             LiquidityProviders::PancakeSwap => {
-                vec!["add_liquidity", "remove_liquidity", "swap"]
+                vec![/*"add_liquidity", "remove_liquidity",*/ "swap"]
             }
             _ => {
                 vec![]

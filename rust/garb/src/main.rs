@@ -17,6 +17,8 @@ use tokio::sync::RwLock;
 use url::Url;
 use itertools::Itertools;
 use garb_sync_aptos::Pool;
+
+// 0x7eb53ac5b9d0c6dd0b29da998a9c1d1e6f8592c677d8e601c1bbde4fcd0c1480
 static NODE_URL: Lazy<Url> = Lazy::new(|| {
     Url::from_str(
         std::env::var("APTOS_NODE_URL")
@@ -86,7 +88,7 @@ pub async fn transactor(routes: &mut kanal::AsyncReceiver<HashSet<(String, Vec<P
         // TODO: Write a move module that will take a vector of pools and simulates the transaction
         //       and executes the best one
         // we'll redo this part, but for now we'll just test if the routes are profitable
-        for (_in, route) in routes {
+        for (_in_token, route) in routes {
             if route.len() <= 0 {
                 continue;
             }
@@ -103,9 +105,11 @@ pub async fn transactor(routes: &mut kanal::AsyncReceiver<HashSet<(String, Vec<P
                 let i = aptos_client
                       .get_index()
                       .await;
+                
+                let mut function = "two_step_route";
                 if let Ok(index) = i {
                     let mut type_tags: Vec<TypeTag> = route.iter()
-                                                           .map(|p| if p.x_to_y { vec![p.x_address.clone(), p.y_address.clone()] } else { vec![p.y_address.clone(), p.x_address.clone()] })
+                                                           .map(|p|  vec![p.x_address.clone(), p.y_address.clone()] )
                                                            .flatten()
                                                            .unique()
                                                            .map(|a| TypeTag::Struct(Box::new(StructTag::from_str(&a).unwrap())))
@@ -114,14 +118,19 @@ pub async fn transactor(routes: &mut kanal::AsyncReceiver<HashSet<(String, Vec<P
                     type_tags.push(TypeTag::Struct(Box::new(StructTag::from_str(if first_pool.x_to_y { &first_pool.x_address } else { &first_pool.y_address }).unwrap())));
                     type_tags.push(TypeTag::Struct(Box::new(StructTag::from_str(if first_pool.x_to_y { &first_pool.x_address } else { &first_pool.y_address }).unwrap())));
                     type_tags.push(TypeTag::Struct(Box::new(StructTag::from_str(if first_pool.x_to_y { &first_pool.x_address } else { &first_pool.y_address }).unwrap())));
-                    type_tags.push(TypeTag::Struct(Box::new(StructTag::from_str(if first_pool.x_to_y { &first_pool.x_address } else { &first_pool.y_address }).unwrap())));
+    
+                    if route.len() > 2 {
+                        type_tags.push(TypeTag::Struct(Box::new(StructTag::from_str(if first_pool.x_to_y { &first_pool.x_address } else { &first_pool.y_address }).unwrap())));
+                        function = "three_step_route"
+                    }
+                   
             
                     let mut args = vec![];
             
                     for (_i, pool) in route.iter().enumerate() {
                         args.push((&(pool.clone().provider.id as u8)).to_be_bytes().to_vec());
                         args.push(1_u64.to_be_bytes().to_vec());
-                        args.push(1_u8.to_be_bytes().to_vec());
+                        args.push(if pool.x_to_y {1_u8.to_be_bytes().to_vec()} else {0_u8.to_be_bytes().to_vec()});
                     }
                     args.push(1_u64.to_be_bytes().to_vec());
                     args.push(1_u64.to_be_bytes().to_vec());
@@ -129,24 +138,24 @@ pub async fn transactor(routes: &mut kanal::AsyncReceiver<HashSet<(String, Vec<P
                     let tx = tx_f.payload(TransactionPayload::EntryFunction(
                         EntryFunction::new(
                             ModuleId::new(AccountAddress::from_str("0x89576037b3cc0b89645ea393a47787bb348272c76d6941c574b053672b848039").unwrap(), Identifier::new("aggregator").unwrap()),
-                            Identifier::new("three_step_route").unwrap(),
+                            Identifier::new(function).unwrap(),
                             type_tags,
                             args
                         )
                     ))
                                  .sender(KEY.address())
-                                 .sequence_number(index.inner().ledger_timestamp.0)
+                                 .sequence_number(4)
                                  .build();
-                    println!("tx: {:?}", tx);
+                    // println!("tx: {:?}", tx);
                     let signed_tx = KEY.sign_transaction(tx);
                     let sim_result = aptos_client.simulate_bcs_with_gas_estimation(&signed_tx, true, true).await;
                     if let Ok(result) = sim_result {
                         println!("sim_result: {:?}", result);
                     } else {
-                        eprintln!("sim_result: {:?}", sim_result.unwrap_err());
+                        // eprintln!("sim_result: {:?}", sim_result.unwrap_err());
                     }
                 } else {
-                    eprintln!("Error getting index {:?}", i.unwrap_err());
+                    // eprintln!("Error getting index {:?}", i.unwrap_err());
                 }
             });
         }

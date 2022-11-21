@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use async_std::sync::Arc;
 use petgraph::algo::all_simple_paths;
 use petgraph::prelude::{Graph, NodeIndex};
-use petgraph::Undirected;
+use petgraph::{Undirected};
 use tokio::sync::RwLock;
 use garb_sync_aptos::Pool;
 
@@ -41,6 +41,23 @@ use garb_sync_aptos::Pool;
 //     find_new_cycles(vec![*node], graph, cycles)
 //
 // }
+
+fn combinations<T>(v: &[T], k: usize) -> Vec<Vec<T>>
+where T: Clone {
+    if k == 0 {
+        return vec![vec![]];
+    }
+    let mut result = vec![];
+    for i in 0..v.len() {
+        let mut rest = v.to_vec();
+        rest.remove(i);
+        for mut c in combinations(&rest, k - 1) {
+            c.push(v[i].clone());
+            result.push(c);
+        }
+    }
+    result
+}
 pub async fn start(
     pools: Arc<RwLock<HashMap<String, Pool>>>,
     updated_q: kanal::AsyncReceiver<Pool>,
@@ -67,7 +84,6 @@ pub async fn start(
     let mut the_graph: Graph<String, Pool, Undirected> = Graph::<String, Pool, Undirected>::new_undirected();
     let pr = pools.read().await;
     for (_, pool) in pr.iter() {
-        // println!("Adding node {:?} {} {}", pool.provider.id,pool.x_address.clone(), pool.y_address.clone());
         let index1 = the_graph
               .node_indices()
               .find(|i| the_graph[*i] == pool.x_address.clone());
@@ -84,10 +100,11 @@ pub async fn start(
         } else {
             index2.unwrap()
         };
-        
-        the_graph.update_edge(i1, i2, Pool::from(pool));
+        if the_graph.edges_connecting(i1, i2).find(|e| e.weight().y_address == pool.y_address && e.weight().address == pool.address && e.weight().provider.id == pool.provider.id && e.weight().x_address == pool.x_address).is_none() {
+            the_graph.add_edge(i1, i2, pool.clone());
+        }
     }
-    println!("Number of coins: {}", the_graph.node_count());
+    println!("graph service> Preparing routes {} ", the_graph.node_count(), );
     
     let mut checked_coin_indices: Vec<NodeIndex> = vec![];
     for checked_coin in checked_coins {
@@ -95,21 +112,62 @@ pub async fn start(
               .node_indices()
               .find(|i| the_graph[*i] == checked_coin)
         {
-            checked_coin_indices.push(index)
+            checked_coin_indices.push(index);
+            
         } else {
             println!(
-                "Skipping {} because there are no pools with that coin",
+                "graph service> Skipping {} because there are no pools with that coin",
                 checked_coin
             );
         }
     }
     
-    
     let mut path_lookup = HashMap::<Pool, HashSet<(String, Vec<Pool>)>>::new();
-    for edge in the_graph.edge_indices() {
+    let mut two_step_routes = HashSet::<(String, Vec<Pool>)>::new();
+    
+    // two step routes first
+    for node in the_graph.node_indices() {
+        for checked_coin in &*checked_coin_indices {
+            let in_address = the_graph.node_weight(*checked_coin).unwrap().to_string();
+        
+            two_step_routes = the_graph.neighbors(node.clone()).map(|p| {
+                let neighbor = the_graph.node_weight(p).unwrap();
+                if *neighbor == in_address {
+                    let edges_connecting = the_graph.edges_connecting(node.clone(), p);
+                    if edges_connecting.clone().count() >= 2 {
+                        let mut pools: Vec<Pool> = vec![];
+                        // println!("graph service> Found route for {} to {} via {}", node_addr, neighbor, edges_connecting.clone().count());
+                    
+                        for edge in edges_connecting {
+                            pools.push(Pool::from(edge.weight()));
+                        }
+                        let combined_routes = combinations(pools.as_mut_slice(), 2);
+                        return combined_routes.iter().filter(|path| {
+                            let first_pool = path.first().unwrap();
+                            let last_pool = path.last().unwrap();
+                            if (first_pool.x_address == in_address && last_pool.y_address == in_address) || (first_pool.y_address == in_address && last_pool.x_address == in_address) {
+                                return true;
+                            } else {
+                                return false
+                            }
+                        }).map(|path| {
+                            (in_address.clone(), path.clone())
+                        }).collect::<Vec<(String, Vec<Pool>)>>();
+                    } else {
+                        return vec![]
+                    }
+                } else {
+                    vec![]
+                }
+            }).filter(|p| p.len() > 0).flatten().collect::<HashSet<(String, Vec<Pool>)>>();
+        }
+    }
+    
+    let edges_count = the_graph.edge_count();
+    for (i, edge) in the_graph.edge_indices().enumerate() {
+        println!("graph service> Preparing routes {} / {}", i, edges_count);
         let edge = the_graph.edge_weight(edge).unwrap();
         
-        // maybe pop the last element and drain the rest to get only the latest event
         let index1 = the_graph
               .node_indices()
               .find(|i| the_graph[*i] == edge.x_address)
@@ -124,12 +182,9 @@ pub async fn start(
         let mut safe_paths: HashSet<(String, Vec<Pool>)> = HashSet::new();
         
         for node in updated_nodes {
-            if checked_coin_indices.contains(&node) {
-                continue;
-            }
             for checked_coin in &*checked_coin_indices {
-                let mut in_address = the_graph.node_weight(*checked_coin).unwrap().to_string();
-                
+                let in_address = the_graph.node_weight(*checked_coin).unwrap().to_string();
+               
                 // TODO: make max_intermediate_nodes and min_intermediate_nodes configurable
                 // find all the paths that lead to the current checked coin from the updated coin
                 // max_intermediate_nodes limits the number of swaps we make, it can be any number but the bigger
@@ -143,13 +198,13 @@ pub async fn start(
                 )
                       .collect::<Vec<_>>();
                 for (i, ni) in to_checked_paths.iter().enumerate() {
-                    'second: for (j, nj) in to_checked_paths.iter().enumerate() {
+                     for (j, nj) in to_checked_paths.iter().enumerate() {
                         // skip routing back and forth
                         if i == j {
                             continue;
                         }
                         
-                        // eg. assuming the checked coin is wormhole usdc and one of the coins in the updated pool  is apt
+                        // eg. assuming the checked coin is wormhole usdc and the other coin is apt
                         //     ni: [apt -> via aux -> usdd -> via liquidswap -> usdc]
                         //     for each nj: [[apt -> via animeswap -> usdc],[apt -> via aux -> mojo -> via aux -> usdc],...]
                         //
@@ -165,13 +220,14 @@ pub async fn start(
                             continue;
                         }
                         // collect all the pools between the coins
-                        // permutate the edges
+                        // combine the edges
                         let mut edge_paths: Vec<Vec<Pool>> = vec![];
                         for (i, node) in new_path.iter().enumerate() {
                             if i == 0 {
                                 continue;
                             }
                             let edges = the_graph.edges_connecting(**node, *new_path[i - 1]);
+                            
                             if edge_paths.len() <= 0 {
                                 for edge in edges.clone() {
                                     let mut pool = edge.weight().clone();
@@ -180,26 +236,24 @@ pub async fn start(
                                 }
                                 continue;
                             }
-                            if edges.clone().count() > 1 {
-    
-                                println!("edges: {:?}", edges.clone().count());
-                            }
                             let mut new_edge_paths = vec![];
-                            let mut in_a = in_address.clone();
+                            
                             for old_path in edge_paths {
+                                let last_pool = old_path.last().unwrap();
+                                let in_a = if last_pool.x_to_y {
+                                    last_pool.y_address.clone()
+                                } else {
+                                    last_pool.x_address.clone()
+                                };
                                 for edge in edges.clone() {
                                     let mut pool = edge.weight().clone();
                                     pool.x_to_y = pool.x_address == in_a;
-                                    in_a = if pool.x_to_y {
-                                        pool.y_address.clone()
-                                    } else {
-                                        pool.x_address.clone()
-                                    };
                                     new_edge_paths.push(old_path.clone().into_iter().chain(vec![pool]).collect());
                                 }
                             }
                             edge_paths = new_edge_paths;
                         }
+
                         
                         for edge_path in edge_paths {
                             safe_paths.insert((in_address.clone(), edge_path));
@@ -209,27 +263,35 @@ pub async fn start(
                 }
             }
         }
-        // use only paths that route through the updated pool
+        // use only paths that route through the current edge
         // println!("Total Paths for {:?}: {}", edge.address, safe_paths.len());
         safe_paths = safe_paths.into_iter().filter(|(_in, path)| {
             path.iter().any(|p| p.address == edge.address && p.x_address == edge.x_address && p.y_address == edge.y_address)
         }).collect();
-        // println!("Total Valid Paths for {:?}: {}", edge.address, safe_paths.len());
-        
+        let two_step = two_step_routes.clone().into_iter().filter( |(_in_addr, path) | {
+            path.iter().any(|p| p.address == edge.address && p.x_address == edge.x_address && p.y_address == edge.y_address)
+        }).collect::<HashSet<(String, Vec<Pool>)>>();
+        safe_paths.extend(two_step);
         path_lookup.insert(Pool::from(edge), safe_paths);
         
-        
-        
-        
     }
-    println!("graph service> Done finding routes, Listening for updates... {}", path_lookup.len());
+    
+    let mut total_paths = 0;
+    for (_pool, paths) in path_lookup.clone() {
+        total_paths += paths.len();
+    }
+    
+    
+    
+    
+    println!("graph service> Found {} routes, Listening for updates...", total_paths);
     
     while let Ok(updated_market) = updated_q.recv().await {
         if let Some(market_routes) = path_lookup.get(&updated_market) {
             if market_routes.len() <= 0 {
                 continue
             }
-            println!("graph service> {} routes for {}", market_routes.len(), updated_market);
+            println!("graph service> {} routes that go through {}", market_routes.len(), updated_market);
             routes.send(market_routes.clone()).await.unwrap();
         } else {
             eprintln!("graph service> No routes found for {}", updated_market);
