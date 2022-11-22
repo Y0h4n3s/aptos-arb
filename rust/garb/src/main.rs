@@ -88,7 +88,7 @@ pub async fn async_main() -> anyhow::Result<()> {
 //         it is updated every time there is an event on a pool on chain
 //         we will spam the network with transaction simulations and pick the best one
 pub async fn transactor(routes: &mut kanal::AsyncReceiver<HashSet<(String, Vec<Pool>)>>) {
-    let seq_number = Arc::new(tokio::sync::RwLock::new(14_u64));
+    let seq_number = Arc::new(tokio::sync::RwLock::new(22_u64));
 
     while let Ok(routes) = routes.recv().await {
         // TODO: Write a move module that will take a vector of pools and simulates the transaction
@@ -159,7 +159,7 @@ pub async fn transactor(routes: &mut kanal::AsyncReceiver<HashSet<(String, Vec<P
                     )));
                 }
 
-                if let Some(pool) = third_pool {
+                if let Some(pool) = third_pool.clone() {
                     args.push((&(pool.clone().provider.id as u8)).to_le_bytes().to_vec());
                     args.push(0_u64.to_le_bytes().to_vec());
 
@@ -186,7 +186,7 @@ pub async fn transactor(routes: &mut kanal::AsyncReceiver<HashSet<(String, Vec<P
                     )));
                     function = "three_step_route"
                 }
-
+                
                 type_tags.push(TypeTag::Struct(Box::new(
                     StructTag::from_str(if first_pool.x_to_y {
                         &first_pool.x_address
@@ -203,7 +203,35 @@ pub async fn transactor(routes: &mut kanal::AsyncReceiver<HashSet<(String, Vec<P
                     })
                     .unwrap(),
                 )));
-
+    
+                if first_pool.curve.is_some() {
+                    let first_extra_index = if function == "two_step_route" {
+                        3
+                    } else {
+                        4
+                    };
+                    std::mem::replace(&mut type_tags[first_extra_index], TypeTag::Struct(Box::new(
+                        StructTag::from_str(&first_pool.curve.as_ref().unwrap()).unwrap(),
+                    )));
+                }
+                if second_pool.curve.is_some() {
+                    let second_extra_index = if function == "two_step_route" {
+                        4
+                    } else {
+                        5
+                    };
+                    std::mem::replace(&mut type_tags[second_extra_index], TypeTag::Struct(Box::new(
+                        StructTag::from_str(&second_pool.curve.as_ref().unwrap()).unwrap(),
+                    )));
+                }
+                if third_pool.is_some() {
+                    let third_pool = third_pool.unwrap();
+                    if third_pool.curve.is_some() {
+                        std::mem::replace(&mut type_tags[6], TypeTag::Struct(Box::new(
+                            StructTag::from_str(&third_pool.curve.as_ref().unwrap()).unwrap(),
+                        )));
+                    }
+                }
                 let decimals = decimals(in_token.clone());
                 args.push((3_u64 * 10_u64.pow(decimals as u32)).to_le_bytes().to_vec());
                 args.push((3_u64 * 10_u64.pow(decimals as u32)).to_le_bytes().to_vec());

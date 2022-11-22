@@ -64,6 +64,7 @@ pub struct Pool {
     pub address: String,
     pub x_address: String,
     pub y_address: String,
+    pub curve: Option<String>,
     pub x_amount: u64,
     pub y_amount: u64,
     pub provider: LiquidityProvider,
@@ -83,6 +84,7 @@ impl From<&Pool> for Pool {
             address: pool.address.clone(),
             x_address: pool.x_address.clone(),
             y_address: pool.y_address.clone(),
+            curve: pool.curve.clone(),
             x_amount: pool.x_amount,
             y_amount: pool.y_amount,
             provider: pool.provider.clone(),
@@ -138,16 +140,16 @@ static PROVIDERS: Lazy<Vec<LiquidityProvider>> = Lazy::new(|| {
             events_name: Some(String::from("PairEventHolder")),
             event_has_types: true,
         },
-        LiquidityProvider {
-            contract_address: String::from(CETUE_CONTRACT),
-            resource_address: None,
-            id: LiquidityProviders::Aptoswap,
-            pool_module: String::from("amm_swap"),
-            pool_name: String::from("Pool"),
-            events_module: Some(String::from("amm_swap")),
-            events_name: Some(String::from("PoolSwapEventHandle")),
-            event_has_types: false,
-        },
+        // LiquidityProvider {
+        //     contract_address: String::from(CETUE_CONTRACT),
+        //     resource_address: None,
+        //     id: LiquidityProviders::Aptoswap,
+        //     pool_module: String::from("amm_swap"),
+        //     pool_name: String::from("Pool"),
+        //     events_module: Some(String::from("amm_swap")),
+        //     events_name: Some(String::from("PoolSwapEventHandle")),
+        //     event_has_types: false,
+        // },
         LiquidityProvider {
             contract_address: String::from(APTOSWAP_CONTRACT),
             resource_address: None,
@@ -158,16 +160,16 @@ static PROVIDERS: Lazy<Vec<LiquidityProvider>> = Lazy::new(|| {
             events_name: None,
             event_has_types: true,
         },
-        // LiquidityProvider {
-        //     contract_address: String::from(LIQUIDSWAP_CONTRACT),
-        //     resource_address: Some(String::from(LIQUIDSWAP_RESOURCE)),
-        //     id: LiquidityProviders::LiquidSwap,
-        //     pool_module: String::from("liquidity_pool"),
-        //     pool_name: String::from("LiquidityPool"),
-        //     events_module: Some(String::from("liquidity_pool")),
-        //     events_name: Some(String::from("EventsStore")),
-        //     event_has_types: true,
-        // },
+        LiquidityProvider {
+            contract_address: String::from(LIQUIDSWAP_CONTRACT),
+            resource_address: Some(String::from(LIQUIDSWAP_RESOURCE)),
+            id: LiquidityProviders::LiquidSwap,
+            pool_module: String::from("liquidity_pool"),
+            pool_name: String::from("LiquidityPool"),
+            events_module: Some(String::from("liquidity_pool")),
+            events_name: Some(String::from("EventsStore")),
+            event_has_types: true,
+        },
         LiquidityProvider {
             contract_address: String::from(AUX_CONTRACT),
             resource_address: None,
@@ -319,6 +321,9 @@ async fn poll_events(
         task.await.unwrap();
     }
 }
+//4.19729386
+//4.253248
+//3.015342
 async fn register_provider_events(
     pools: Arc<tokio::sync::RwLock<HashMap<String, Pool>>>,
     aptos_client: Arc<Client>,
@@ -370,6 +375,7 @@ async fn register_provider_events(
                             + ">",
                         x_address: coin_x.clone(),
                         y_address: coin_y.clone(),
+                        curve: None,
                         x_amount: 0,
                         y_amount: 0,
                         provider: provider.clone(),
@@ -495,6 +501,7 @@ async fn register_liquidswap_events(
                             + ">",
                         x_address: coin_x,
                         y_address: coin_y,
+                        curve: Some(curve),
                         x_amount: 0,
                         y_amount: 0,
                         provider: provider.clone(),
