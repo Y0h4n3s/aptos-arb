@@ -17,7 +17,8 @@ use url::Url;
 
 const PANCAKESWAP_CONTRACT: &str =
     "0xc7efb4076dbe143cbcd98cfaaa929ecfc8f299203dfff63b95ccb6bfe19850fa";
-const CETUE_CONTRACT: &str = "0xec42a352cc65eca17a9fa85d0fc602295897ed6b8b8af6a6c79ef490eb8f9eba";
+const CETUE_CONTRACT: &str =
+    "0xec42a352cc65eca17a9fa85d0fc602295897ed6b8b8af6a6c79ef490eb8f9eba";
 const APTOSWAP_CONTRACT: &str =
     "0xa5d3ac4d429052674ed38adc62d010e52d7c24ca159194d17ddc196ddb7e480b";
 const AUX_CONTRACT: &str = "0xbd35135844473187163ca197ca93b2ab014370587bb0ed3befff9e902d6bb541";
@@ -157,16 +158,16 @@ static PROVIDERS: Lazy<Vec<LiquidityProvider>> = Lazy::new(|| {
             events_name: None,
             event_has_types: true,
         },
-        LiquidityProvider {
-            contract_address: String::from(LIQUIDSWAP_CONTRACT),
-            resource_address: Some(String::from(LIQUIDSWAP_RESOURCE)),
-            id: LiquidityProviders::LiquidSwap,
-            pool_module: String::from("liquidity_pool"),
-            pool_name: String::from("LiquidityPool"),
-            events_module: Some(String::from("liquidity_pool")),
-            events_name: Some(String::from("EventsStore")),
-            event_has_types: true,
-        },
+        // LiquidityProvider {
+        //     contract_address: String::from(LIQUIDSWAP_CONTRACT),
+        //     resource_address: Some(String::from(LIQUIDSWAP_RESOURCE)),
+        //     id: LiquidityProviders::LiquidSwap,
+        //     pool_module: String::from("liquidity_pool"),
+        //     pool_name: String::from("LiquidityPool"),
+        //     events_module: Some(String::from("liquidity_pool")),
+        //     events_name: Some(String::from("EventsStore")),
+        //     event_has_types: true,
+        // },
         LiquidityProvider {
             contract_address: String::from(AUX_CONTRACT),
             resource_address: None,
@@ -205,31 +206,31 @@ pub async fn start(
             LiquidityProviders::Aux => {
                 vec![
                     "swap_events",
-                    //"add_liquidity_events",
-                    //"remove_liquidity_events",
+                    "add_liquidity_events",
+                    "remove_liquidity_events",
                 ]
             }
 
             LiquidityProviders::AnimeSwap => {
-                vec!["swap_event", /*"flash_swap_event", "remove_liquidity_events"*/]
+                vec!["swap_event", "flash_swap_event", "remove_liquidity_events"]
             }
 
             LiquidityProviders::Aptoswap => {
                 vec![
-                    //"liquidity_event",
+                    "liquidity_event",
                     "swap_token_event",
-                    //"remove_liquidity_events",
+                    "remove_liquidity_events",
                 ]
             }
             LiquidityProviders::Cetue => {
                 vec![
-                    //"add_liquidity_events",
-                    //"remove_liquidity_events",
+                    "add_liquidity_events",
+                    "remove_liquidity_events",
                     "swap_events",
                 ]
             }
             LiquidityProviders::PancakeSwap => {
-                vec![/*"add_liquidity", "remove_liquidity",*/ "swap"]
+                vec!["add_liquidity", "remove_liquidity", "swap"]
             }
             _ => {
                 vec![]
