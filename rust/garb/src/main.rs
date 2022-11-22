@@ -263,6 +263,11 @@ pub async fn transactor(routes: &mut kanal::AsyncReceiver<HashSet<(String, Vec<P
                                     // send the transaction
                                     let result = aptos_client.submit(&signed_tx).await;
                                     if let Ok(result) = result {
+                                        println!("`````````````````````` Tried Route ``````````````````````");
+                                        for (i, pool) in route.iter().enumerate() {
+                                            println!("{}. {}", i + 1, pool);
+                                        }
+                                        println!("\n\n");
                                         println!("Sent transaction check here https://explorer.aptos.com/txn/{:?}", result.inner().hash.0);
                                         let mut seq_num = sequence_number.write().await;
                                         *seq_num += 1;

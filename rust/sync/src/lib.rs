@@ -15,13 +15,15 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use url::Url;
 
+const OBRIC_CONTRACT: &str = "0xc7ea756470f72ae761b7986e4ed6fd409aad183b1b2d3d2f674d979852f45c4b";
 const PANCAKESWAP_CONTRACT: &str =
     "0xc7efb4076dbe143cbcd98cfaaa929ecfc8f299203dfff63b95ccb6bfe19850fa";
 const CETUE_CONTRACT: &str =
     "0xec42a352cc65eca17a9fa85d0fc602295897ed6b8b8af6a6c79ef490eb8f9eba";
 const APTOSWAP_CONTRACT: &str =
     "0xa5d3ac4d429052674ed38adc62d010e52d7c24ca159194d17ddc196ddb7e480b";
-const AUX_CONTRACT: &str = "0xbd35135844473187163ca197ca93b2ab014370587bb0ed3befff9e902d6bb541";
+const AUX_CONTRACT: &str =
+    "0xbd35135844473187163ca197ca93b2ab014370587bb0ed3befff9e902d6bb541";
 const LIQUIDSWAP_CONTRACT: &str =
     "0x190d44266241744264b964a37b8f09863167a12d3e70cda39376cfb4e3561e12";
 const LIQUIDSWAP_RESOURCE: &str =
@@ -140,6 +142,16 @@ static PROVIDERS: Lazy<Vec<LiquidityProvider>> = Lazy::new(|| {
             events_name: Some(String::from("PairEventHolder")),
             event_has_types: true,
         },
+        LiquidityProvider {
+            contract_address: String::from(OBRIC_CONTRACT),
+            resource_address: None,
+            id: LiquidityProviders::Obric,
+            pool_module: String::from("piece_swap"),
+            pool_name: String::from("PieceSwapPoolInfo"),
+            events_module: None,
+            events_name: None,
+            event_has_types: true,
+        },
         // LiquidityProvider {
         //     contract_address: String::from(CETUE_CONTRACT),
         //     resource_address: None,
@@ -150,16 +162,16 @@ static PROVIDERS: Lazy<Vec<LiquidityProvider>> = Lazy::new(|| {
         //     events_name: Some(String::from("PoolSwapEventHandle")),
         //     event_has_types: false,
         // },
-        LiquidityProvider {
-            contract_address: String::from(APTOSWAP_CONTRACT),
-            resource_address: None,
-            id: LiquidityProviders::Aptoswap,
-            pool_module: String::from("pool"),
-            pool_name: String::from("Pool"),
-            events_module: None,
-            events_name: None,
-            event_has_types: true,
-        },
+        // LiquidityProvider {
+        //     contract_address: String::from(APTOSWAP_CONTRACT),
+        //     resource_address: None,
+        //     id: LiquidityProviders::Aptoswap,
+        //     pool_module: String::from("pool"),
+        //     pool_name: String::from("Pool"),
+        //     events_module: None,
+        //     events_name: None,
+        //     event_has_types: true,
+        // },
         LiquidityProvider {
             contract_address: String::from(LIQUIDSWAP_CONTRACT),
             resource_address: Some(String::from(LIQUIDSWAP_RESOURCE)),
@@ -180,16 +192,16 @@ static PROVIDERS: Lazy<Vec<LiquidityProvider>> = Lazy::new(|| {
             events_name: None,
             event_has_types: true,
         },
-        LiquidityProvider {
-            contract_address: String::from(ANIMESWAP_CONTRACT),
-            resource_address: Some(String::from(ANIMESWAP_RESOURCE)),
-            id: LiquidityProviders::AnimeSwap,
-            pool_module: String::from("AnimeSwapPoolV1"),
-            pool_name: String::from("LiquidityPool"),
-            events_module: Some(String::from("AnimeSwapPoolV1")),
-            events_name: Some(String::from("Events")),
-            event_has_types: true,
-        },
+        // LiquidityProvider {
+        //     contract_address: String::from(ANIMESWAP_CONTRACT),
+        //     resource_address: Some(String::from(ANIMESWAP_RESOURCE)),
+        //     id: LiquidityProviders::AnimeSwap,
+        //     pool_module: String::from("AnimeSwapPoolV1"),
+        //     pool_name: String::from("LiquidityPool"),
+        //     events_module: Some(String::from("AnimeSwapPoolV1")),
+        //     events_name: Some(String::from("Events")),
+        //     event_has_types: true,
+        // },
     ]
 });
 
