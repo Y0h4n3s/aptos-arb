@@ -20,12 +20,18 @@ use tokio::sync::RwLock;
 use url::Url;
 
 // 0x7eb53ac5b9d0c6dd0b29da998a9c1d1e6f8592c677d8e601c1bbde4fcd0c1480
+// 0xfd2594ac71d95d1e86df9921d03ad2a409b871ee7f866560c21ff17945fd2fca
+// R: total reports
+// ri: report priority
+// bi: bounty share
+//
+// bi = 2 ^ (R - ri) / ((2^R) - 1)
 static NODE_URL: Lazy<Url> = Lazy::new(|| {
     Url::from_str(
         std::env::var("APTOS_NODE_URL")
             .as_ref()
             .map(|s| s.as_str())
-            .unwrap_or("https://aptos-mainnet.pontem.network/"),
+            .unwrap_or("http://val1.mainnet.aptos.p2p.org"),
     )
     .unwrap()
 });
@@ -89,6 +95,19 @@ pub async fn async_main() -> anyhow::Result<()> {
 //         we will spam the network with transaction simulations and pick the best one
 pub async fn transactor(routes: &mut kanal::AsyncReceiver<HashSet<(String, Vec<Pool>)>>) {
     let seq_number = Arc::new(tokio::sync::RwLock::new(22_u64));
+    let seq_num = seq_number.clone();
+    tokio::spawn(async move {
+        // keep updating seq_number
+
+        loop {
+            let aptos_client = Client::new_with_timeout(NODE_URL.clone(), Duration::from_secs(45));
+            if let Ok(account) = aptos_client.get_account(KEY.address()).await {
+                let seq = account.inner().sequence_number;
+                *seq_num.clone().write().await = seq;
+            }
+            tokio::time::sleep(Duration::from_secs(30)).await;
+        }
+    });
 
     while let Ok(routes) = routes.recv().await {
         // TODO: Write a move module that will take a vector of pools and simulates the transaction
@@ -109,6 +128,7 @@ pub async fn transactor(routes: &mut kanal::AsyncReceiver<HashSet<(String, Vec<P
                 let aptos_client =
                     Client::new_with_timeout(NODE_URL.clone(), Duration::from_secs(45));
 
+                // build the transaction
                 let first_pool = route.first().unwrap();
                 let second_pool = route.get(1).unwrap();
                 let third_pool = route.get(2);
@@ -186,7 +206,7 @@ pub async fn transactor(routes: &mut kanal::AsyncReceiver<HashSet<(String, Vec<P
                     )));
                     function = "three_step_route"
                 }
-                
+
                 type_tags.push(TypeTag::Struct(Box::new(
                     StructTag::from_str(if first_pool.x_to_y {
                         &first_pool.x_address
@@ -203,107 +223,120 @@ pub async fn transactor(routes: &mut kanal::AsyncReceiver<HashSet<(String, Vec<P
                     })
                     .unwrap(),
                 )));
-    
+
                 if first_pool.curve.is_some() {
-                    let first_extra_index = if function == "two_step_route" {
-                        3
-                    } else {
-                        4
-                    };
-                    std::mem::replace(&mut type_tags[first_extra_index], TypeTag::Struct(Box::new(
-                        StructTag::from_str(&first_pool.curve.as_ref().unwrap()).unwrap(),
-                    )));
+                    let first_extra_index = if function == "two_step_route" { 3 } else { 4 };
+                    std::mem::replace(
+                        &mut type_tags[first_extra_index],
+                        TypeTag::Struct(Box::new(
+                            StructTag::from_str(&first_pool.curve.as_ref().unwrap()).unwrap(),
+                        )),
+                    );
                 }
                 if second_pool.curve.is_some() {
-                    let second_extra_index = if function == "two_step_route" {
-                        4
-                    } else {
-                        5
-                    };
-                    std::mem::replace(&mut type_tags[second_extra_index], TypeTag::Struct(Box::new(
-                        StructTag::from_str(&second_pool.curve.as_ref().unwrap()).unwrap(),
-                    )));
+                    let second_extra_index = if function == "two_step_route" { 4 } else { 5 };
+                    std::mem::replace(
+                        &mut type_tags[second_extra_index],
+                        TypeTag::Struct(Box::new(
+                            StructTag::from_str(&second_pool.curve.as_ref().unwrap()).unwrap(),
+                        )),
+                    );
                 }
                 if third_pool.is_some() {
                     let third_pool = third_pool.unwrap();
                     if third_pool.curve.is_some() {
-                        std::mem::replace(&mut type_tags[6], TypeTag::Struct(Box::new(
-                            StructTag::from_str(&third_pool.curve.as_ref().unwrap()).unwrap(),
-                        )));
+                        std::mem::replace(
+                            &mut type_tags[6],
+                            TypeTag::Struct(Box::new(
+                                StructTag::from_str(&third_pool.curve.as_ref().unwrap()).unwrap(),
+                            )),
+                        );
                     }
                 }
                 let decimals = decimals(in_token.clone());
-                args.push((3_u64 * 10_u64.pow(decimals as u32)).to_le_bytes().to_vec());
-                args.push((3_u64 * 10_u64.pow(decimals as u32)).to_le_bytes().to_vec());
+                args.push((4_u64 * 10_u64.pow(decimals as u32)).to_le_bytes().to_vec());
+                args.push(
+                    (4_u64 * 10_u64.pow(decimals as u32) + 2000_u64)
+                        .to_le_bytes()
+                        .to_vec(),
+                );
                 let tx_f =
                     aptos_sdk::transaction_builder::TransactionFactory::new(ChainId::new(1_u8));
-                let seq_num = sequence_number.read().await;
-                let tx = tx_f.payload(TransactionPayload::EntryFunction(
+                'sim_loop: loop {
+                    let seq_num = sequence_number.read().await;
+                    let tx = tx_f.payload(TransactionPayload::EntryFunction(
                         EntryFunction::new(
                             ModuleId::new(AccountAddress::from_str("0x89576037b3cc0b89645ea393a47787bb348272c76d6941c574b053672b848039").unwrap(), Identifier::new("aggregator").unwrap()),
                             Identifier::new(function).unwrap(),
-                            type_tags,
-                            args
+                            type_tags.clone(),
+                            args.clone()
                         )
                     ))
                                  .sender(KEY.address())
                                  .sequence_number(*seq_num)
+                                 .max_gas_amount(30000)
                                  .build();
-                std::mem::drop(seq_num);
-                // println!("tx: {:?}", tx);
-                let signed_tx = KEY.sign_transaction(tx);
-                let sim_result = aptos_client
-                    .simulate_bcs_with_gas_estimation(&signed_tx, true, true)
-                    .await;
-                if let Ok(result) = sim_result {
-                    match result.into_inner().info {
-                        TransactionInfo::V0(info) => {
-                            match info.status() {
-                                ExecutionStatus::Success => {
-                                    // send the transaction
-                                    let result = aptos_client.submit(&signed_tx).await;
-                                    if let Ok(result) = result {
-                                        println!("`````````````````````` Tried Route ``````````````````````");
-                                        for (i, pool) in route.iter().enumerate() {
-                                            println!("{}. {}", i + 1, pool);
+                    std::mem::drop(seq_num);
+                    // println!("tx: {:?}", tx);
+                    let signed_tx = KEY.sign_transaction(tx);
+                    let sim_result = aptos_client
+                        .simulate_bcs_with_gas_estimation(&signed_tx, true, true)
+                        .await;
+                    if let Ok(result) = sim_result {
+                        match result.into_inner().info {
+                            TransactionInfo::V0(info) => {
+                                match info.status() {
+                                    ExecutionStatus::Success => {
+                                        // send the transaction
+                                        let result = aptos_client.submit(&signed_tx).await;
+                                        if let Ok(result) = result {
+                                            println!("`````````````````````` Tried Route ``````````````````````");
+                                            for (i, pool) in route.iter().enumerate() {
+                                                println!("{}. {}", i + 1, pool);
+                                            }
+                                            println!("\n\n");
+                                            println!("Sent transaction check here https://explorer.aptos.com/txn/{:?}", result.inner().hash.0.to_string());
+                                            let mut seq_num = sequence_number.write().await;
+                                            *seq_num += 1;
+                                            println!("seq_num: {:?}", seq_num);
+                                        } else {
+                                            println!("error: {:?}", result);
                                         }
-                                        println!("\n\n");
-                                        println!("Sent transaction check here https://explorer.aptos.com/txn/{:?}", result.inner().hash.0);
-                                        let mut seq_num = sequence_number.write().await;
-                                        *seq_num += 1;
-                                        println!("seq_num: {:?}", seq_num);
-                                    } else {
-                                        println!("error: {:?}", result);
                                     }
-                                }
-                                ExecutionStatus::OutOfGas => {}
-                                ExecutionStatus::MoveAbort {
-                                    location,
-                                    code,
-                                    info,
-                                } => {
-                                    println!("MoveAbort: {:?} {:?} {:?}", location, code, info);
-                                }
-                                ExecutionStatus::ExecutionFailure {
-                                    location,
-                                    function,
-                                    code_offset,
-                                } => {
-                                    println!(
-                                        "ExecutionFailure: {:?} {:?} {:?}",
-                                        location, function, code_offset
-                                    );
-                                }
-                                ExecutionStatus::MiscellaneousError(val) => {
-                                    if let Some(code) = val {
-                                        println!("MiscellaneousError: {:?}", code);
+                                    ExecutionStatus::OutOfGas => {}
+                                    ExecutionStatus::MoveAbort {
+                                        location,
+                                        code,
+                                        info,
+                                    } => {
+                                        println!("MoveAbort: {:?} {:?} {:?}", location, code, info);
+                                        if let Some(info) = info {
+                                            if info.reason_name == "EINSUFFICIENT_LIQUIDITY" {
+                                                break 'sim_loop;
+                                            }
+                                        }
+                                    }
+                                    ExecutionStatus::ExecutionFailure {
+                                        location,
+                                        function,
+                                        code_offset,
+                                    } => {
+                                        println!(
+                                            "ExecutionFailure: {:?} {:?} {:?}",
+                                            location, function, code_offset
+                                        );
+                                    }
+                                    ExecutionStatus::MiscellaneousError(val) => {
+                                        if let Some(code) = val {
+                                            println!("MiscellaneousError: {:?}", code);
+                                        }
                                     }
                                 }
                             }
                         }
+                    } else {
+                        eprintln!("sim_result: {:?}", sim_result.unwrap_err());
                     }
-                } else {
-                    // eprintln!("sim_result: {:?}", sim_result.unwrap_err());
                 }
             });
         }
@@ -312,22 +345,10 @@ pub async fn transactor(routes: &mut kanal::AsyncReceiver<HashSet<(String, Vec<P
 
 // this is going to be too slow, find a better way to do this
 fn decimals(coin: String) -> u64 {
-    let mut coin_decimals = HashMap::<String, u64>::new();
-    coin_decimals.insert(
-        "0x0000000000000000000000000000000000000000000000000000000000000001::aptos_coin::AptosCoin"
-            .to_string(),
-        8,
-    );
-    coin_decimals.insert(
-        "0x1000000fa32d122c18a6a31c009ce5e71674f22d06a581bb0a15575e6addadcc::usda::USDA"
-            .to_string(),
-        6,
-    );
-    coin_decimals.insert(
-        "0x5e156f1207d0ebfa19a9eeff00d62a282278fb8719f4fab3a586a0a2c0fffbea::coin::T".to_string(),
-        6,
-    );
-    coin_decimals.insert("0x8d87a65ba30e09357fa2edea2c80dbac296e5dec2b18287113500b902942929d::celer_coin_manager::UsdcCoin".to_string(), 6);
-
-    coin_decimals.get(coin.as_str()).unwrap().clone()
+    match coin.as_str() {
+        "0x0000000000000000000000000000000000000000000000000000000000000001::aptos_coin::AptosCoin" => {
+            8
+        }
+        _ => {6}
+    }
 }

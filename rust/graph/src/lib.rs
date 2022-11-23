@@ -70,8 +70,8 @@ pub async fn start(
     let checked_coins: Vec<&str> = vec![
         // "0x8d87a65ba30e09357fa2edea2c80dbac296e5dec2b18287113500b902942929d::celer_coin_manager::BusdCoin", // celer BUSD
         // "0xf22bede237a07e121b56d91a491eb7bcdfd1f5907926a9e58338f964a01b17fa::asset::USDC", // layer zero USDC
-        "0x5e156f1207d0ebfa19a9eeff00d62a282278fb8719f4fab3a586a0a2c0fffbea::coin::T", // wormhole USDC
-        "0x8d87a65ba30e09357fa2edea2c80dbac296e5dec2b18287113500b902942929d::celer_coin_manager::UsdcCoin", //celer USDC
+        // "0x5e156f1207d0ebfa19a9eeff00d62a282278fb8719f4fab3a586a0a2c0fffbea::coin::T", // wormhole USDC
+        // "0x8d87a65ba30e09357fa2edea2c80dbac296e5dec2b18287113500b902942929d::celer_coin_manager::UsdcCoin", //celer USDC
         // "0xf22bede237a07e121b56d91a491eb7bcdfd1f5907926a9e58338f964a01b17fa::asset::USDT", // layerzero USDT
         // "0xa2eda21a58856fda86451436513b867c97eecb4ba099da5775520e0f7492e852::coin::T", // wormhole USDT
         // "0x8d87a65ba30e09357fa2edea2c80dbac296e5dec2b18287113500b902942929d::celer_coin_manager::UsdtCoin", // celer USDT
@@ -284,18 +284,20 @@ pub async fn start(
     
     
     
-    println!("graph service> Found {} routes, Listening for updates...", total_paths);
-    
-    while let Ok(updated_market) = updated_q.recv().await {
-        if let Some(market_routes) = path_lookup.get(&updated_market) {
-            if market_routes.len() <= 0 {
-                continue
-            }
-            // println!("graph service> {} routes that go through {}", market_routes.len(), updated_market);
-            routes.send(market_routes.clone()).await.unwrap();
-        } else {
-            eprintln!("graph service> No routes found for {}", updated_market);
-        }
+    println!("graph service> Found {} routes", total_paths);
+    for (pool, paths) in path_lookup.iter() {
+        routes.send(paths.clone()).await.unwrap();
     }
+    // while let Ok(updated_market) = updated_q.recv().await {
+    //     if let Some(market_routes) = path_lookup.get(&updated_market) {
+    //         if market_routes.len() <= 0 {
+    //             continue
+    //         }
+    //         // println!("graph service> {} routes that go through {}", market_routes.len(), updated_market);
+    //         routes.send(market_routes.clone()).await.unwrap();
+    //     } else {
+    //         eprintln!("graph service> No routes found for {}", updated_market);
+    //     }
+    // }
     Ok(())
 }

@@ -172,16 +172,16 @@ static PROVIDERS: Lazy<Vec<LiquidityProvider>> = Lazy::new(|| {
         //     events_name: None,
         //     event_has_types: true,
         // },
-        LiquidityProvider {
-            contract_address: String::from(LIQUIDSWAP_CONTRACT),
-            resource_address: Some(String::from(LIQUIDSWAP_RESOURCE)),
-            id: LiquidityProviders::LiquidSwap,
-            pool_module: String::from("liquidity_pool"),
-            pool_name: String::from("LiquidityPool"),
-            events_module: Some(String::from("liquidity_pool")),
-            events_name: Some(String::from("EventsStore")),
-            event_has_types: true,
-        },
+        // LiquidityProvider {
+        //     contract_address: String::from(LIQUIDSWAP_CONTRACT),
+        //     resource_address: Some(String::from(LIQUIDSWAP_RESOURCE)),
+        //     id: LiquidityProviders::LiquidSwap,
+        //     pool_module: String::from("liquidity_pool"),
+        //     pool_name: String::from("LiquidityPool"),
+        //     events_module: Some(String::from("liquidity_pool")),
+        //     events_name: Some(String::from("EventsStore")),
+        //     event_has_types: true,
+        // },
         LiquidityProvider {
             contract_address: String::from(AUX_CONTRACT),
             resource_address: None,
@@ -270,7 +270,7 @@ pub async fn start(
     }
 
     Ok(tokio::spawn(async move {
-        poll_events(pools, updated_q, aptos_client).await
+        // poll_events(pools, updated_q, aptos_client).await
     }))
 }
 
