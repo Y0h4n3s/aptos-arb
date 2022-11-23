@@ -15,7 +15,6 @@ use garb_sync_aptos::Pool;
 use std::collections::{HashMap, HashSet};
 use std::str::FromStr;
 use std::time::Duration;
-use itertools::max;
 use tokio::runtime::Runtime;
 use tokio::sync::RwLock;
 use url::Url;
@@ -97,10 +96,12 @@ pub async fn async_main() -> anyhow::Result<()> {
 //         we will spam the network with transaction simulations and pick the best one
 pub async fn transactor(routes: &mut kanal::AsyncReceiver<HashSet<(String, Vec<Pool>)>>) {
     let seq_number = Arc::new(tokio::sync::RwLock::new(22_u64));
-    let seq_num = seq_number.clone();
+    let gas_unit_price = Arc::new(tokio::sync::RwLock::new(22_u64));
     
     
     let mut join_handles = vec![];
+    let seq_num = seq_number.clone();
+    let gas_price = gas_unit_price.clone();
     join_handles.push(tokio::spawn(async move {
         // keep updating seq_number
     
@@ -112,7 +113,21 @@ pub async fn transactor(routes: &mut kanal::AsyncReceiver<HashSet<(String, Vec<P
                 *w = seq ;
                 std::mem::drop(w);
             }
-            tokio::time::sleep(Duration::from_secs(30)).await;
+            tokio::time::sleep(Duration::from_secs(5)).await;
+        }
+    }));
+    join_handles.push(tokio::spawn(async move {
+        // keep updating gas unit price
+        
+        loop {
+            let aptos_client = Client::new_with_timeout(NODE_URL.clone(), Duration::from_secs(45));
+            if let Ok(account) = aptos_client.estimate_gas_price().await {
+                let gas_estimate = account.inner().gas_estimate;
+                let mut w = gas_price.write().await;
+                *w = gas_estimate ;
+                std::mem::drop(w);
+            }
+            tokio::time::sleep(Duration::from_secs(100)).await;
         }
     }));
     let par_requests = Arc::new(tokio::sync::Semaphore::new(125));
@@ -126,6 +141,7 @@ pub async fn transactor(routes: &mut kanal::AsyncReceiver<HashSet<(String, Vec<P
                 continue;
             }
             let sequence_number = seq_number.clone();
+            let gas_unit_price = gas_unit_price.clone();
             let requests = par_requests.clone();
             join_handles.push(tokio::spawn(async move {
                 // println!("`````````````````````` Simulating Route ``````````````````````");
@@ -265,11 +281,7 @@ pub async fn transactor(routes: &mut kanal::AsyncReceiver<HashSet<(String, Vec<P
     
                 let decimals = decimals(in_token.clone());
                 args.push((4_u64 * 10_u64.pow(decimals as u32)).to_le_bytes().to_vec());
-                args.push(
-                    (4_u64 * 10_u64.pow(decimals as u32) + (max_gas_units * 10))
-                        .to_le_bytes()
-                        .to_vec(),
-                );
+                
                 let tx_f =
                     aptos_sdk::transaction_builder::TransactionFactory::new(ChainId::new(1_u8));
                 // simulate and try when it works
@@ -277,14 +289,23 @@ pub async fn transactor(routes: &mut kanal::AsyncReceiver<HashSet<(String, Vec<P
                     let permit = requests.acquire().await.unwrap();
                     let aptos_client =
                           Client::new_with_timeout(NODE_URL.clone(), Duration::from_secs(15));
-                    
+    
+                    let gas_unit = gas_unit_price.read().await;
+                    println!("gas unit price: {}", gas_unit);
+                    let mut args = args.clone();
+                    args.push(
+                        (4_u64 * 10_u64.pow(decimals as u32) + (max_gas_units * *gas_unit))
+                              .to_le_bytes()
+                              .to_vec(),
+                    );
+                    std::mem::drop(gas_unit);
                     let seq_num = sequence_number.read().await;
                     let tx = tx_f.payload(TransactionPayload::EntryFunction(
                         EntryFunction::new(
                             ModuleId::new(AccountAddress::from_str("0x89576037b3cc0b89645ea393a47787bb348272c76d6941c574b053672b848039").unwrap(), Identifier::new("aggregator").unwrap()),
                             Identifier::new(function).unwrap(),
                             type_tags.clone(),
-                            args.clone()
+                            args
                         )
                     ))
                                  .sender(KEY.address())
@@ -301,12 +322,14 @@ pub async fn transactor(routes: &mut kanal::AsyncReceiver<HashSet<(String, Vec<P
                         std::mem::drop(permit);
                         match result.into_inner().info {
                             TransactionInfo::V0(info) => {
-                                if info.gas_used() > max_gas_units {
-                                    println!("exceeds gas units: {}", info.gas_used());
-                                    continue 'sim_loop;
-                                }
+                                
                                 match info.status() {
                                     ExecutionStatus::Success => {
+                                        if info.gas_used() > max_gas_units {
+                                            println!("exceeds gas units: {}", info.gas_used());
+                                            continue 'sim_loop;
+                                        }
+                                        
                                         // send the transaction
                                         let result = aptos_client.submit(&signed_tx).await;
                                         if let Ok(result) = result {
