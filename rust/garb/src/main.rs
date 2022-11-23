@@ -89,6 +89,7 @@ pub async fn async_main() -> anyhow::Result<()> {
     );
     Ok(())
 }
+
 // Transactor
 // routes: the updated paths compiled by the graph task
 //         it is updated every time there is an event on a pool on chain
@@ -103,31 +104,36 @@ pub async fn transactor(routes: &mut kanal::AsyncReceiver<HashSet<(String, Vec<P
             let aptos_client = Client::new_with_timeout(NODE_URL.clone(), Duration::from_secs(45));
             if let Ok(account) = aptos_client.get_account(KEY.address()).await {
                 let seq = account.inner().sequence_number;
-                *seq_num.clone().write().await = seq;
+                let mut w = seq_num.write().await;
+                *w = seq ;
+                std::mem::drop(w);
             }
             tokio::time::sleep(Duration::from_secs(30)).await;
         }
     });
+    
+    let mut join_handles = vec![];
+    let par_requests = Arc::new(tokio::sync::Semaphore::new(300));
 
     while let Ok(routes) = routes.recv().await {
         // TODO: Write a move module that will take a vector of pools and simulates the transaction
         //       and executes the best one
         // we'll redo this part, but for now we'll just test if the routes are profitable
-        for (in_token, route) in routes {
+        for (i, (in_token, route)) in routes.into_iter().enumerate() {
             if route.len() <= 0 {
                 continue;
             }
             let sequence_number = seq_number.clone();
-
-            tokio::spawn(async move {
+            let requests = par_requests.clone();
+            join_handles.push(tokio::spawn(async move {
                 // println!("`````````````````````` Simulating Route ``````````````````````");
                 // for (i, pool) in route.iter().enumerate() {
                 //     println!("{}. {}", i + 1, pool);
                 // }
                 // println!("\n\n");
-                let aptos_client =
-                    Client::new_with_timeout(NODE_URL.clone(), Duration::from_secs(45));
-
+                
+                
+                
                 // build the transaction
                 let first_pool = route.first().unwrap();
                 let second_pool = route.get(1).unwrap();
@@ -256,13 +262,18 @@ pub async fn transactor(routes: &mut kanal::AsyncReceiver<HashSet<(String, Vec<P
                 let decimals = decimals(in_token.clone());
                 args.push((4_u64 * 10_u64.pow(decimals as u32)).to_le_bytes().to_vec());
                 args.push(
-                    (4_u64 * 10_u64.pow(decimals as u32) + 2000_u64)
+                    (4_u64 * 10_u64.pow(decimals as u32) + 500000_u64)
                         .to_le_bytes()
                         .to_vec(),
                 );
                 let tx_f =
                     aptos_sdk::transaction_builder::TransactionFactory::new(ChainId::new(1_u8));
+                // simulate and try when it works
                 'sim_loop: loop {
+                    let permit = requests.acquire().await.unwrap();
+                    let aptos_client =
+                          Client::new_with_timeout(NODE_URL.clone(), Duration::from_secs(15));
+                    
                     let seq_num = sequence_number.read().await;
                     let tx = tx_f.payload(TransactionPayload::EntryFunction(
                         EntryFunction::new(
@@ -283,6 +294,7 @@ pub async fn transactor(routes: &mut kanal::AsyncReceiver<HashSet<(String, Vec<P
                         .simulate_bcs_with_gas_estimation(&signed_tx, true, true)
                         .await;
                     if let Ok(result) = sim_result {
+                        std::mem::drop(permit);
                         match result.into_inner().info {
                             TransactionInfo::V0(info) => {
                                 match info.status() {
@@ -303,7 +315,9 @@ pub async fn transactor(routes: &mut kanal::AsyncReceiver<HashSet<(String, Vec<P
                                             println!("error: {:?}", result);
                                         }
                                     }
-                                    ExecutionStatus::OutOfGas => {}
+                                    ExecutionStatus::OutOfGas => {
+                                        println!("out of gas");
+                                    }
                                     ExecutionStatus::MoveAbort {
                                         location,
                                         code,
@@ -311,7 +325,7 @@ pub async fn transactor(routes: &mut kanal::AsyncReceiver<HashSet<(String, Vec<P
                                     } => {
                                         println!("MoveAbort: {:?} {:?} {:?}", location, code, info);
                                         if let Some(info) = info {
-                                            if info.reason_name == "EINSUFFICIENT_LIQUIDITY" {
+                                            if info.reason_name == "EINSUFFICIENT_LIQUIDITY" || info.reason_name == "EPOOL_NOT_FOUND" {
                                                 break 'sim_loop;
                                             }
                                         }
@@ -335,11 +349,15 @@ pub async fn transactor(routes: &mut kanal::AsyncReceiver<HashSet<(String, Vec<P
                             }
                         }
                     } else {
+                        std::mem::drop(permit);
                         eprintln!("sim_result: {:?}", sim_result.unwrap_err());
                     }
                 }
-            });
+            }));
         }
+    }
+    for task in join_handles {
+        task.await.unwrap();
     }
 }
 
