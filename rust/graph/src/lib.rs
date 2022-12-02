@@ -4,7 +4,7 @@ use async_std::sync::Arc;
 use petgraph::algo::all_simple_paths;
 use petgraph::prelude::{Graph, NodeIndex};
 use petgraph::{Undirected};
-use tokio::sync::RwLock;
+use tokio::sync::{RwLock, Semaphore};
 use garb_sync_aptos::Pool;
 
 // fn find_new_cycles(mut path: Vec<NodeIndex>, graph: &Graph<String, Pool, Undirected>, mut cycles: Vec<Vec<NodeIndex>>) -> Vec<Vec<NodeIndex>>   {
@@ -122,7 +122,7 @@ pub async fn start(
         }
     }
     
-    let mut path_lookup = HashMap::<Pool, HashSet<(String, Vec<Pool>)>>::new();
+    let mut path_lookup = Arc::new(RwLock::new(HashMap::<Pool, HashSet<(String, Vec<Pool>)>>::new()));
     let mut two_step_routes = HashSet::<(String, Vec<Pool>)>::new();
     
     // two step routes first
@@ -130,7 +130,7 @@ pub async fn start(
         for checked_coin in &*checked_coin_indices {
             let in_address = the_graph.node_weight(*checked_coin).unwrap().to_string();
         
-            two_step_routes = the_graph.neighbors(node.clone()).map(|p| {
+            two_step_routes = two_step_routes.union(&the_graph.neighbors(node.clone()).map(|p| {
                 let neighbor = the_graph.node_weight(p).unwrap();
                 if *neighbor == in_address {
                     let edges_connecting = the_graph.edges_connecting(node.clone(), p);
@@ -159,125 +159,137 @@ pub async fn start(
                 } else {
                     vec![]
                 }
-            }).filter(|p| p.len() > 0).flatten().collect::<HashSet<(String, Vec<Pool>)>>();
+            }).filter(|p| p.len() > 0).flatten().collect::<HashSet<(String, Vec<Pool>)>>())
+                  .map(|i| i.clone()).collect();
         }
     }
-    
+    let cores = num_cpus::get();
+    let permits = Arc::new(Semaphore::new(cores));
     let edges_count = the_graph.edge_count();
     for (i, edge) in the_graph.edge_indices().enumerate() {
+        let permit = permits.clone().acquire_owned().await.unwrap();
         println!("graph service> Preparing routes {} / {}", i, edges_count);
-        let edge = the_graph.edge_weight(edge).unwrap();
-        
-        let index1 = the_graph
-              .node_indices()
-              .find(|i| the_graph[*i] == edge.x_address)
-              .unwrap();
-        let index2 = the_graph
-              .node_indices()
-              .find(|i| the_graph[*i] == edge.y_address)
-              .unwrap();
-        // println!("graph service> Finding routes for {}", edge);
-        
-        let updated_nodes = vec![index1, index2];
-        let mut safe_paths: HashSet<(String, Vec<Pool>)> = HashSet::new();
-        
-        for node in updated_nodes {
-            for checked_coin in &*checked_coin_indices {
-                let in_address = the_graph.node_weight(*checked_coin).unwrap().to_string();
-               
-                // TODO: make max_intermediate_nodes and min_intermediate_nodes configurable
-                // find all the paths that lead to the current checked coin from the updated coin
-                // max_intermediate_nodes limits the number of swaps we make, it can be any number but the bigger
-                // the number the more time it will take to find the paths
-                let to_checked_paths = all_simple_paths::<Vec<NodeIndex>, _>(
-                    &the_graph,
-                    node,
-                    *checked_coin,
-                    0,
-                    Some(1),
-                )
-                      .collect::<Vec<_>>();
-                for (i, ni) in to_checked_paths.iter().enumerate() {
-                     for (j, nj) in to_checked_paths.iter().enumerate() {
-                        // skip routing back and forth
-                        if i == j {
-                            continue;
-                        }
-                        
-                        // eg. assuming the checked coin is wormhole usdc and the other coin is apt
-                        //     ni: [apt -> via aux -> usdd -> via liquidswap -> usdc]
-                        //     for each nj: [[apt -> via animeswap -> usdc],[apt -> via aux -> mojo -> via aux -> usdc],...]
-                        //
-                        // p1 -> reverse -> pop = [usdc -> via liquidswap -> usdd]
-                        // new_path = [usdc -> via liquidswap -> usdd -> via aux -> apt -> via animeswap -> usdc]
-                        let mut p1 = ni.clone();
-                        p1.reverse();
-                        p1.pop();
-                        
-                        let new_path: Vec<&NodeIndex> = p1.iter().chain(nj).collect();
-                        
-                        if new_path.len() > 4 {
-                            continue;
-                        }
-                        // collect all the pools between the coins
-                        // combine the edges
-                        let mut edge_paths: Vec<Vec<Pool>> = vec![];
-                        for (i, node) in new_path.iter().enumerate() {
-                            if i == 0 {
-                                continue;
-                            }
-                            let edges = the_graph.edges_connecting(**node, *new_path[i - 1]);
-                            
-                            if edge_paths.len() <= 0 {
-                                for edge in edges.clone() {
-                                    let mut pool = edge.weight().clone();
-                                    pool.x_to_y = pool.x_address == in_address;
-                                    edge_paths.push(vec![pool]);
-                                }
-                                continue;
-                            }
-                            let mut new_edge_paths = vec![];
-                            
-                            for old_path in edge_paths {
-                                let last_pool = old_path.last().unwrap();
-                                let in_a = if last_pool.x_to_y {
-                                    last_pool.y_address.clone()
-                                } else {
-                                    last_pool.x_address.clone()
-                                };
-                                for edge in edges.clone() {
-                                    let mut pool = edge.weight().clone();
-                                    pool.x_to_y = pool.x_address == in_a;
-                                    new_edge_paths.push(old_path.clone().into_iter().chain(vec![pool]).collect());
-                                }
-                            }
-                            edge_paths = new_edge_paths;
-                        }
-
-                        
-                        for edge_path in edge_paths {
-                            safe_paths.insert((in_address.clone(), edge_path));
+        let the_graph = the_graph.clone();
+        let checked_coin_indices = checked_coin_indices.clone();
+        let two_step_routes = two_step_routes.clone();
+        let path_lookup = path_lookup.clone();
+        tokio::spawn(async move {
+            let edge = the_graph.edge_weight(edge).unwrap();
     
+            let index1 = the_graph
+                  .node_indices()
+                  .find(|i| the_graph[*i] == edge.x_address)
+                  .unwrap();
+            let index2 = the_graph
+                  .node_indices()
+                  .find(|i| the_graph[*i] == edge.y_address)
+                  .unwrap();
+            // println!("graph service> Finding routes for {}", edge);
+    
+            let updated_nodes = vec![index1, index2];
+            let mut safe_paths: HashSet<(String, Vec<Pool>)> = HashSet::new();
+    
+            for node in updated_nodes {
+                for checked_coin in &*checked_coin_indices {
+                    let in_address = the_graph.node_weight(*checked_coin).unwrap().to_string();
+            
+                    // TODO: make max_intermediate_nodes and min_intermediate_nodes configurable
+                    // find all the paths that lead to the current checked coin from the updated coin
+                    // max_intermediate_nodes limits the number of swaps we make, it can be any number but the bigger
+                    // the number the more time it will take to find the paths
+                    let to_checked_paths = all_simple_paths::<Vec<NodeIndex>, _>(
+                        &the_graph,
+                        node,
+                        *checked_coin,
+                        0,
+                        Some(1),
+                    )
+                          .collect::<Vec<_>>();
+                    for (i, ni) in to_checked_paths.iter().enumerate() {
+                        for (j, nj) in to_checked_paths.iter().enumerate() {
+                            // skip routing back and forth
+                            if i == j {
+                                continue;
+                            }
+                    
+                            // eg. assuming the checked coin is wormhole usdc and the other coin is apt
+                            //     ni: [apt -> via aux -> usdd -> via liquidswap -> usdc]
+                            //     for each nj: [[apt -> via animeswap -> usdc],[apt -> via aux -> mojo -> via aux -> usdc],...]
+                            //
+                            // p1 -> reverse -> pop = [usdc -> via liquidswap -> usdd]
+                            // new_path = [usdc -> via liquidswap -> usdd -> via aux -> apt -> via animeswap -> usdc]
+                            let mut p1 = ni.clone();
+                            p1.reverse();
+                            p1.pop();
+                    
+                            let new_path: Vec<&NodeIndex> = p1.iter().chain(nj).collect();
+                    
+                            if new_path.len() > 4 {
+                                continue;
+                            }
+                            // collect all the pools between the coins
+                            // combine the edges
+                            let mut edge_paths: Vec<Vec<Pool>> = vec![];
+                            for (i, node) in new_path.iter().enumerate() {
+                                if i == 0 {
+                                    continue;
+                                }
+                                let edges = the_graph.edges_connecting(**node, *new_path[i - 1]);
+                        
+                                if edge_paths.len() <= 0 {
+                                    for edge in edges.clone() {
+                                        let mut pool = edge.weight().clone();
+                                        pool.x_to_y = pool.x_address == in_address;
+                                        edge_paths.push(vec![pool]);
+                                    }
+                                    continue;
+                                }
+                                let mut new_edge_paths = vec![];
+                        
+                                for old_path in edge_paths {
+                                    let last_pool = old_path.last().unwrap();
+                                    let in_a = if last_pool.x_to_y {
+                                        last_pool.y_address.clone()
+                                    } else {
+                                        last_pool.x_address.clone()
+                                    };
+                                    for edge in edges.clone() {
+                                        let mut pool = edge.weight().clone();
+                                        pool.x_to_y = pool.x_address == in_a;
+                                        new_edge_paths.push(old_path.clone().into_iter().chain(vec![pool]).collect());
+                                    }
+                                }
+                                edge_paths = new_edge_paths;
+                            }
+                    
+                    
+                            for edge_path in edge_paths {
+                                safe_paths.insert((in_address.clone(), edge_path));
+                        
+                            }
                         }
                     }
                 }
             }
-        }
-        // use only paths that route through the current edge
-        // println!("Total Paths for {:?}: {}", edge.address, safe_paths.len());
-        safe_paths = safe_paths.into_iter().filter(|(_in, path)| {
-            path.iter().any(|p| p.address == edge.address && p.x_address == edge.x_address && p.y_address == edge.y_address)
-        }).collect();
-        let two_step = two_step_routes.clone().into_iter().filter( |(_in_addr, path) | {
-            path.iter().any(|p| p.address == edge.address && p.x_address == edge.x_address && p.y_address == edge.y_address)
-        }).collect::<HashSet<(String, Vec<Pool>)>>();
-        safe_paths.extend(two_step);
-        path_lookup.insert(Pool::from(edge), safe_paths);
+            // use only paths that route through the current edge
+            // println!("Total Paths for {:?}: {}", edge.address, safe_paths.len());
+            safe_paths = safe_paths.into_iter().filter(|(_in, path)| {
+                path.iter().any(|p| p.address == edge.address && p.x_address == edge.x_address && p.y_address == edge.y_address)
+            }).collect();
+            let two_step = two_step_routes.clone().into_iter().filter( |(_in_addr, path) | {
+                path.iter().any(|p| p.address == edge.address && p.x_address == edge.x_address && p.y_address == edge.y_address)
+            }).collect::<HashSet<(String, Vec<Pool>)>>();
+            safe_paths.extend(two_step);
+            let mut w = path_lookup.write().await;
+            w.insert(Pool::from(edge), safe_paths);
+            std::mem::drop(permit);
+        });
+        
         
     }
     
     let mut total_paths = 0;
-    for (_pool, paths) in path_lookup.clone() {
+    for (_pool, paths) in path_lookup.read().await.clone() {
         total_paths += paths.len();
     }
     
@@ -285,7 +297,7 @@ pub async fn start(
     
     
     println!("graph service> Found {} routes", total_paths);
-    for (pool, paths) in path_lookup.iter() {
+    for (pool, paths) in path_lookup.read().await.iter() {
         routes.send(paths.clone()).await.unwrap();
     }
     // while let Ok(updated_market) = updated_q.recv().await {

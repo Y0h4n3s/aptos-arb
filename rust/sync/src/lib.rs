@@ -152,16 +152,16 @@ static PROVIDERS: Lazy<Vec<LiquidityProvider>> = Lazy::new(|| {
             events_name: None,
             event_has_types: true,
         },
-        // LiquidityProvider {
-        //     contract_address: String::from(CETUE_CONTRACT),
-        //     resource_address: None,
-        //     id: LiquidityProviders::Aptoswap,
-        //     pool_module: String::from("amm_swap"),
-        //     pool_name: String::from("Pool"),
-        //     events_module: Some(String::from("amm_swap")),
-        //     events_name: Some(String::from("PoolSwapEventHandle")),
-        //     event_has_types: false,
-        // },
+        LiquidityProvider {
+            contract_address: String::from(CETUE_CONTRACT),
+            resource_address: None,
+            id: LiquidityProviders::Aptoswap,
+            pool_module: String::from("amm_swap"),
+            pool_name: String::from("Pool"),
+            events_module: Some(String::from("amm_swap")),
+            events_name: Some(String::from("PoolSwapEventHandle")),
+            event_has_types: false,
+        },
         LiquidityProvider {
             contract_address: String::from(APTOSWAP_CONTRACT),
             resource_address: None,
@@ -192,16 +192,16 @@ static PROVIDERS: Lazy<Vec<LiquidityProvider>> = Lazy::new(|| {
             events_name: None,
             event_has_types: true,
         },
-        // LiquidityProvider {
-        //     contract_address: String::from(ANIMESWAP_CONTRACT),
-        //     resource_address: Some(String::from(ANIMESWAP_RESOURCE)),
-        //     id: LiquidityProviders::AnimeSwap,
-        //     pool_module: String::from("AnimeSwapPoolV1"),
-        //     pool_name: String::from("LiquidityPool"),
-        //     events_module: Some(String::from("AnimeSwapPoolV1")),
-        //     events_name: Some(String::from("Events")),
-        //     event_has_types: true,
-        // },
+        LiquidityProvider {
+            contract_address: String::from(ANIMESWAP_CONTRACT),
+            resource_address: Some(String::from(ANIMESWAP_RESOURCE)),
+            id: LiquidityProviders::AnimeSwap,
+            pool_module: String::from("AnimeSwapPoolV1"),
+            pool_name: String::from("LiquidityPool"),
+            events_module: Some(String::from("AnimeSwapPoolV1")),
+            events_name: Some(String::from("Events")),
+            event_has_types: true,
+        },
     ]
 });
 
