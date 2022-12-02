@@ -11,10 +11,11 @@ use aptos_sdk::types::transaction::{
 };
 use aptos_sdk::types::LocalAccount;
 use async_std::sync::Arc;
-use garb_sync_aptos::Pool;
+use garb_sync_aptos::{LiquidityProvider, LiquidityProviders, Pool, SyncConfig};
 use std::collections::{HashMap, HashSet};
 use std::str::FromStr;
 use std::time::Duration;
+use aptos_sdk::types::vm_status::StatusCode;
 use tokio::runtime::Runtime;
 use tokio::sync::RwLock;
 use url::Url;
@@ -78,6 +79,13 @@ static MAX_GAS_UNITS: Lazy<u64> = Lazy::new(|| {
                                             .parse()
                                             .unwrap_or(20000)
 });
+static PROVIDERS: Lazy<Vec<LiquidityProviders>> = Lazy::new(|| {
+    std::env::var("APTOS_PROVIDERS").unwrap_or_else(|_| std::env::args().nth(5).unwrap())
+        .split(",")
+          .map(|s| s.parse::<u8>().unwrap())
+          .map(|i| LiquidityProviders::from(i))
+        .collect()
+});
 
 //TODO: use message channels between sync and graph, and graph and routes
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -112,7 +120,10 @@ pub async fn async_main() -> anyhow::Result<()> {
     let (routes_sender, mut routes_receiver) =
         kanal::bounded_async::<HashSet<(String, Vec<Pool>)>>(100);
     // we start the sync service first to load the pools first
-    garb_sync_aptos::start(pools.clone(), Arc::new(update_q_sender))
+    let sync_config = SyncConfig {
+        providers: PROVIDERS.clone(),
+    };
+    garb_sync_aptos::start(pools.clone(), Arc::new(update_q_sender), sync_config)
         .await
         .unwrap();
     
@@ -169,23 +180,25 @@ pub async fn transactor(routes: &mut kanal::AsyncReceiver<HashSet<(String, Vec<P
     let par_requests = Arc::new(tokio::sync::Semaphore::new(*PARALLEL_REQUESTS));
     let total_tasks = Arc::new(tokio::sync::RwLock::new(0_u64));
     let t = total_tasks.clone();
+    let p = par_requests.clone();
     join_handles.push(tokio::spawn(async move {
         // print info
         loop {
             tokio::time::sleep(Duration::from_secs(30)).await;
             let tasks = t.read().await;
-            println!("tasks: {}", tasks);
+            println!("tasks: {}, working tasks: {}/{}", tasks, *PARALLEL_REQUESTS - p.available_permits(), *PARALLEL_REQUESTS);
         }
     }));
     
     while let Ok(routes) = routes.recv().await {
-        let mut w = total_tasks.write().await;
-        *w += routes.len() as u64;
-        std::mem::drop(w);
+        
         for (i, (in_token, route)) in routes.into_iter().enumerate() {
             if route.len() <= 0 {
                 continue;
             }
+            let mut w = total_tasks.write().await;
+            *w += 1;
+            std::mem::drop(w);
             let sequence_number = seq_number.clone();
             let gas_unit_price = gas_unit_price.clone();
             let requests = par_requests.clone();
@@ -397,34 +410,42 @@ pub async fn transactor(routes: &mut kanal::AsyncReceiver<HashSet<(String, Vec<P
                                         code,
                                         info,
                                     } => {
-                                        // println!("MoveAbort: {:?} {:?} {:?}", location, code, info);
                                         if let Some(info) = info {
+                                            if info.reason_name == "E_OUTPUT_LESS_THAN_MINIMUM" {
+                                                continue 'sim_loop;
+                                            }
                                             if info.reason_name == "EINSUFFICIENT_LIQUIDITY" || info.reason_name == "EPOOL_NOT_FOUND" || info.reason_name == "E_PAIR_NOT_CREATED"{
                                                 let mut w = total_tasks.write().await;
-                                                *w += 1;
+                                                *w -= 1;
                                                 std::mem::drop(w);
                                                 break 'sim_loop;
                                             }
                                         }
+                                        println!("MoveAbort: {:?} {:?} {:?}", location, code, info);
+    
                                     }
                                     ExecutionStatus::ExecutionFailure {
                                         location,
                                         function,
                                         code_offset,
                                     } => {
-                                        // println!(
-                                        //     "ExecutionFailure: {:?} {:?} {:?}",
-                                        //     location, function, code_offset
-                                        // );
+                                       
                                         if (*function == 63 && *code_offset == 10) || (*function == 63 && *code_offset == 10) {
                                             let mut w = total_tasks.write().await;
-                                            *w += 1;
+                                            *w -= 1;
                                             std::mem::drop(w);
                                             break 'sim_loop;
                                         }
+                                        println!(
+                                            "ExecutionFailure: {:?} {:?} {:?}",
+                                            location, function, code_offset
+                                        );
                                     }
                                     ExecutionStatus::MiscellaneousError(val) => {
                                         if let Some(code) = val {
+                                            if *code == StatusCode::SEQUENCE_NUMBER_TOO_NEW || *code == StatusCode::SEQUENCE_NUMBER_TOO_OLD {
+                                                continue 'sim_loop;
+                                            }
                                             println!("MiscellaneousError: {:?}", code);
                                         }
                                     }
@@ -433,7 +454,7 @@ pub async fn transactor(routes: &mut kanal::AsyncReceiver<HashSet<(String, Vec<P
                         }
                     } else {
                         std::mem::drop(permit);
-                        //println!("sim_result: {:?}", sim_result.unwrap_err());
+                        println!("sim_result: {:?}", sim_result.unwrap_err());
                     }
                 }
             }));

@@ -46,6 +46,7 @@ pub struct LiquidityProvider {
 }
 
 #[derive(Debug, Clone, PartialOrd, PartialEq, Eq, Hash)]
+#[repr(u8)]
 pub enum LiquidityProviders {
     Hippo = 1,
     Econia = 2,
@@ -59,6 +60,26 @@ pub enum LiquidityProviders {
     Cetue = 10,
     PancakeSwap = 11,
     Obric = 12,
+}
+
+impl From<u8> for LiquidityProviders {
+    fn from(value: u8) -> Self {
+        match value {
+            1 => LiquidityProviders::Hippo,
+            2 => LiquidityProviders::Econia,
+            3 => LiquidityProviders::LiquidSwap,
+            4 => LiquidityProviders::Basiq,
+            5 => LiquidityProviders::Ditto,
+            6 => LiquidityProviders::Tortuga,
+            7 => LiquidityProviders::Aptoswap,
+            8 => LiquidityProviders::Aux,
+            9 => LiquidityProviders::AnimeSwap,
+            10 => LiquidityProviders::Cetue,
+            11 => LiquidityProviders::PancakeSwap,
+            12 => LiquidityProviders::Obric,
+            _ => panic!("Invalid liquidity provider"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -111,6 +132,10 @@ impl EventHandle {
     pub fn new(key: EventKey, count: u64) -> Self {
         Self { key, count }
     }
+}
+
+pub struct SyncConfig {
+    pub providers: Vec<LiquidityProviders>
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -208,13 +233,14 @@ static PROVIDERS: Lazy<Vec<LiquidityProvider>> = Lazy::new(|| {
 pub async fn start(
     pools: Arc<tokio::sync::RwLock<HashMap<String, Pool>>>,
     updated_q: Arc<kanal::AsyncSender<Pool>>,
+    config: SyncConfig,
 ) -> anyhow::Result<tokio::task::JoinHandle<()>> {
     let aptos_client = Arc::new(Client::new_with_timeout(
         NODE_URL.clone(),
         Duration::from_secs(45),
     ));
     let mut join_handles = vec![];
-    for provider in PROVIDERS.clone().into_iter() {
+    for provider in PROVIDERS.clone().into_iter().filter(|p| config.providers.contains(&p.id)) {
         // TODO: extract this part to be hardcoded into PROVIDERS
         let events = match provider.id {
             LiquidityProviders::Aux => {

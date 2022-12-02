@@ -6,7 +6,7 @@ use petgraph::prelude::{Graph, NodeIndex};
 use petgraph::{Undirected};
 use tokio::sync::{RwLock, Semaphore};
 use garb_sync_aptos::Pool;
-
+use tokio::time::Duration;
 // fn find_new_cycles(mut path: Vec<NodeIndex>, graph: &Graph<String, Pool, Undirected>, mut cycles: Vec<Vec<NodeIndex>>) -> Vec<Vec<NodeIndex>>   {
 //         let start_node = path.first().unwrap().clone();
 //         let mut next_node: Option<NodeIndex> = None;
@@ -299,6 +299,7 @@ pub async fn start(
     println!("graph service> Found {} routes", total_paths);
     for (pool, paths) in path_lookup.read().await.iter() {
         routes.send(paths.clone()).await.unwrap();
+        tokio::time::sleep(Duration::from_secs(2)).await;
     }
     // while let Ok(updated_market) = updated_q.recv().await {
     //     if let Some(market_routes) = path_lookup.get(&updated_market) {
