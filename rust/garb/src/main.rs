@@ -30,25 +30,18 @@ static NODE_URLS: Lazy<Vec<Url>> = Lazy::new(|| {
             .unwrap_or("http://val1.mainnet.aptos.p2p.org"),
     )
     .unwrap(),
-          Url::from_str(
-              std::env::var("APTOS_NODE_URL")
-                    .as_ref()
-                    .map(|s| s.as_str())
-                    .unwrap_or("https://rpc.argo.fi"),
-          )
-                .unwrap(),
+          // Url::from_str(
+          //     std::env::var("APTOS_NODE_URL")
+          //           .as_ref()
+          //           .map(|s| s.as_str())
+          //           .unwrap_or("https://rpc.argo.fi"),
+          // )
+          //       .unwrap(),
           Url::from_str(
               std::env::var("APTOS_NODE_URL")
                     .as_ref()
                     .map(|s| s.as_str())
                     .unwrap_or("http://aptos.lavenderfive.com/"),
-          )
-                .unwrap(),
-          Url::from_str(
-              std::env::var("APTOS_NODE_URL")
-                    .as_ref()
-                    .map(|s| s.as_str())
-                    .unwrap_or("http://vn.mainnet.pontem.network/"),
           )
                 .unwrap()
     ]
@@ -343,7 +336,7 @@ pub async fn transactor(routes: &mut kanal::AsyncReceiver<HashSet<(String, Vec<P
                 let tx_f =
                     aptos_sdk::transaction_builder::TransactionFactory::new(ChainId::new(1_u8));
                 let aptos_client =
-                      Client::new_with_timeout(NODE_URLS.get(i % NODE_URLS.len()).unwrap().clone(), Duration::from_secs(15));
+                      Client::new_with_timeout(NODE_URLS.get(i % NODE_URLS.len()).unwrap().clone(), Duration::from_secs(20));
                 // simulate and try when it works
                 'sim_loop: loop {
                     let permit = requests.acquire().await.unwrap();
@@ -411,10 +404,17 @@ pub async fn transactor(routes: &mut kanal::AsyncReceiver<HashSet<(String, Vec<P
                                         info,
                                     } => {
                                         if let Some(info) = info {
-                                            if info.reason_name == "E_OUTPUT_LESS_THAN_MINIMUM" {
+                                            if info.reason_name == "ECOIN_STORE_NOT_PUBLISHED" {
+                                                for (i, pool) in route.iter().enumerate() {
+                                                    println!("{}. {}", i + 1, pool);
+                                                }
+                                                println!("\n\n");
                                                 continue 'sim_loop;
                                             }
-                                            if info.reason_name == "EINSUFFICIENT_LIQUIDITY" || info.reason_name == "EPOOL_NOT_FOUND" || info.reason_name == "E_PAIR_NOT_CREATED"{
+                                            if info.reason_name == "E_OUTPUT_LESS_THAN_MINIMUM" || info.reason_name == "ERROR_INSUFFICIENT_OUTPUT_AMOUNT" || info.reason_name == "ERR_INSUFFICIENT_OUTPUT_AMOUNT"{
+                                                continue 'sim_loop;
+                                            }
+                                            if info.reason_name == "EINSUFFICIENT_LIQUIDITY" || info.reason_name == "EPOOL_NOT_FOUND" || info.reason_name == "E_PAIR_NOT_CREATED" || info.reason_name == "ERR_INCORRECT_SWAP" || info.reason_name == "ERR_COIN_TYPE_SAME_ERROR" {
                                                 let mut w = total_tasks.write().await;
                                                 *w -= 1;
                                                 std::mem::drop(w);
@@ -430,7 +430,7 @@ pub async fn transactor(routes: &mut kanal::AsyncReceiver<HashSet<(String, Vec<P
                                         code_offset,
                                     } => {
                                        
-                                        if (*function == 63 && *code_offset == 10) || (*function == 63 && *code_offset == 10) {
+                                        if (*function == 67 && *code_offset == 10) || (*function == 63 && *code_offset == 10) || (*function == 44 && *code_offset == 39) {
                                             let mut w = total_tasks.write().await;
                                             *w -= 1;
                                             std::mem::drop(w);
@@ -454,7 +454,7 @@ pub async fn transactor(routes: &mut kanal::AsyncReceiver<HashSet<(String, Vec<P
                         }
                     } else {
                         std::mem::drop(permit);
-                        println!("sim_result: {:?}", sim_result.unwrap_err());
+                        eprintln!("sim_result: {:?} {}", sim_result.unwrap_err(), NODE_URLS.get(i % NODE_URLS.len()).unwrap().clone());
                     }
                 }
             }));

@@ -278,6 +278,16 @@ pub async fn start(
             }).collect();
             let two_step = two_step_routes.clone().into_iter().filter( |(_in_addr, path) | {
                 path.iter().any(|p| p.address == edge.address && p.x_address == edge.x_address && p.y_address == edge.y_address)
+            }).map(|(in_addr, path) | {
+                let mut first_pool = path.first().unwrap().clone();
+                let mut second_pool = path.last().unwrap().clone();
+                if first_pool.x_address != in_addr {
+                    first_pool.x_to_y = false;
+                }
+                if second_pool.x_address != in_addr {
+                    second_pool.x_to_y = false;
+                }
+                return (in_addr, vec![first_pool.clone(), second_pool.clone()]);
             }).collect::<HashSet<(String, Vec<Pool>)>>();
             safe_paths.extend(two_step);
             let mut w = path_lookup.write().await;
