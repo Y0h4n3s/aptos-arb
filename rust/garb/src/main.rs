@@ -79,6 +79,11 @@ static PROVIDERS: Lazy<Vec<LiquidityProviders>> = Lazy::new(|| {
           .map(|i| LiquidityProviders::from(i))
         .collect()
 });
+static QTY: Lazy<u64> = Lazy::new(|| {
+    std::env::var("APTOS_QTY").unwrap_or_else(|_| std::env::args().nth(5).unwrap())
+                                    .parse()
+                                    .unwrap_or(100)
+});
 
 //TODO: use message channels between sync and graph, and graph and routes
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -331,7 +336,7 @@ pub async fn transactor(routes: &mut kanal::AsyncReceiver<HashSet<(String, Vec<P
                 let max_gas_units = MAX_GAS_UNITS.clone();
     
                 let decimals = decimals(in_token.clone());
-                args.push((5_u64 * 10_u64.pow(decimals as u32)).to_le_bytes().to_vec());
+                args.push((QTY.clone() * 10_u64.pow(decimals as u32)).to_le_bytes().to_vec());
                 
                 let tx_f =
                     aptos_sdk::transaction_builder::TransactionFactory::new(ChainId::new(1_u8));
@@ -345,7 +350,7 @@ pub async fn transactor(routes: &mut kanal::AsyncReceiver<HashSet<(String, Vec<P
                     let gas_unit = gas_unit_price.read().await;
                     let mut args = args.clone();
                     args.push(
-                        (5_u64 * 10_u64.pow(decimals as u32) + (max_gas_units * *gas_unit))
+                        (QTY.clone() * 10_u64.pow(decimals as u32) + (max_gas_units * *gas_unit))
                               .to_le_bytes()
                               .to_vec(),
                     );
