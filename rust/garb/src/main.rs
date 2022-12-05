@@ -11,7 +11,7 @@ use aptos_sdk::types::transaction::{
 };
 use aptos_sdk::types::LocalAccount;
 use async_std::sync::Arc;
-use garb_sync_aptos::{LiquidityProvider, LiquidityProviders, Pool, SyncConfig};
+use garb_sync_aptos::{EventSource, LiquidityProvider, LiquidityProviders, Pool, SyncConfig};
 use std::collections::{HashMap, HashSet};
 use std::str::FromStr;
 use std::time::Duration;
@@ -20,6 +20,8 @@ use tokio::runtime::Runtime;
 use tokio::sync::RwLock;
 use url::Url;
 use clap::Parser;
+use garb_graph_aptos::Order;
+
 // 0x7eb53ac5b9d0c6dd0b29da998a9c1d1e6f8592c677d8e601c1bbde4fcd0c1480
 // 0xfd2594ac71d95d1e86df9921d03ad2a409b871ee7f866560c21ff17945fd2fca
 static NODE_URLS: Lazy<Vec<Url>> = Lazy::new(|| {
@@ -112,24 +114,40 @@ pub async fn async_main() -> anyhow::Result<()> {
     // so we have to query events iteratively
     // when there is an event triggered by a pool that pool is added to update_q
     // then we find all the routes that go through the updated pool and try them if they are profitable
-    let (update_q_sender, update_q_receiver) = kanal::bounded_async::<Pool>(100);
+    let (update_q_sender, update_q_receiver) = kanal::bounded_async::<Box<dyn EventSource<Event = Pool>>>(1000);
     // routes holds the routes that pass through an updated pool
     // this will be populated by the graph module when there is an updated pool
     let (routes_sender, mut routes_receiver) =
-        kanal::bounded_async::<HashSet<(String, Vec<Pool>)>>(100);
+        kanal::bounded_async::<Order>(10000);
     // we start the sync service first to load the pools first
     let sync_config = SyncConfig {
         providers: PROVIDERS.clone(),
     };
-    garb_sync_aptos::start(pools.clone(), Arc::new(update_q_sender), sync_config)
+    garb_sync_aptos::start(pools.clone(), update_q_sender, sync_config)
         .await
         .unwrap();
     
+    let mut joins = vec![];
     
-    let (_, _) = tokio::join!(
-        garb_graph_aptos::start(pools.clone(), update_q_receiver, Arc::new(routes_sender)),
-        transactor(&mut routes_receiver)
-    );
+    joins.push(std::thread::spawn(move || {
+        let mut rt = Runtime::new().unwrap();
+       
+        rt.block_on(async move {
+            
+            garb_graph_aptos::start(pools.clone(), update_q_receiver, Arc::new(RwLock::new(routes_sender))).await;
+    
+        });
+    }));
+    joins.push(std::thread::spawn(move || {
+        let mut rt = Runtime::new().unwrap();
+        rt.block_on(async move {
+            transactor(&mut routes_receiver).await;
+    
+        });
+    }));
+    for join in joins {
+        join.join().unwrap()
+    }
     Ok(())
 }
 
@@ -137,7 +155,7 @@ pub async fn async_main() -> anyhow::Result<()> {
 // routes: the updated paths compiled by the graph task
 //         it is updated every time there is an event on a pool on chain
 //         we will spam the network with transaction simulations and pick the best one
-pub async fn transactor(routes: &mut kanal::AsyncReceiver<HashSet<(String, Vec<Pool>)>>) {
+pub async fn transactor(routes: &mut kanal::AsyncReceiver<Order>) {
     let seq_number = Arc::new(tokio::sync::RwLock::new(22_u64));
     let gas_unit_price = Arc::new(tokio::sync::RwLock::new(100_u64));
     
@@ -188,10 +206,9 @@ pub async fn transactor(routes: &mut kanal::AsyncReceiver<HashSet<(String, Vec<P
         }
     }));
     
-    while let Ok(routes) = routes.recv().await {
-        
-        for (i, (in_token, route)) in routes.into_iter().enumerate() {
-            if route.len() <= 0 {
+    while let Ok(order) = routes.try_recv() {
+        if let Some(order) = order {
+            if order.route.len() <= 0 {
                 continue;
             }
             let mut w = total_tasks.write().await;
@@ -202,25 +219,22 @@ pub async fn transactor(routes: &mut kanal::AsyncReceiver<HashSet<(String, Vec<P
             let requests = par_requests.clone();
             let total_tasks = total_tasks.clone();
             join_handles.push(tokio::spawn(async move {
-                
-                
-                
-                
+            
                 // build the transaction
-                let first_pool = route.first().unwrap();
-                let second_pool = route.get(1).unwrap();
-                let third_pool = route.get(2);
+                let first_pool = order.route.first().unwrap();
+                let second_pool = order.route.get(1).unwrap();
+                let third_pool = order.route.get(2);
                 let mut function = "two_step_route";
                 let mut type_tags: Vec<TypeTag> = vec![];
                 let mut args = vec![];
                 args.push(
-                    (&(first_pool.clone().provider.id as u8))
-                        .to_le_bytes()
-                        .to_vec(),
+                    (&(first_pool.clone().provider as u8))
+                          .to_le_bytes()
+                          .to_vec(),
                 );
                 args.push(0_u64.to_le_bytes().to_vec());
                 args.push(1_u8.to_le_bytes().to_vec());
-
+            
                 if first_pool.x_to_y {
                     type_tags.push(TypeTag::Struct(Box::new(
                         StructTag::from_str(&first_pool.x_address).unwrap(),
@@ -237,14 +251,14 @@ pub async fn transactor(routes: &mut kanal::AsyncReceiver<HashSet<(String, Vec<P
                     )));
                 }
                 args.push(
-                    (&(second_pool.clone().provider.id as u8))
-                        .to_le_bytes()
-                        .to_vec(),
+                    (&(second_pool.clone().provider as u8))
+                          .to_le_bytes()
+                          .to_vec(),
                 );
                 args.push(0_u64.to_le_bytes().to_vec());
-
+            
                 if second_pool.y_address == first_pool.x_address
-                    || second_pool.y_address == first_pool.y_address
+                      || second_pool.y_address == first_pool.y_address
                 {
                     args.push(0_u8.to_le_bytes().to_vec());
                     type_tags.push(TypeTag::Struct(Box::new(
@@ -256,13 +270,13 @@ pub async fn transactor(routes: &mut kanal::AsyncReceiver<HashSet<(String, Vec<P
                         StructTag::from_str(&second_pool.y_address).unwrap(),
                     )));
                 }
-
+            
                 if let Some(pool) = third_pool.clone() {
-                    args.push((&(pool.clone().provider.id as u8)).to_le_bytes().to_vec());
+                    args.push((&(pool.clone().provider as u8)).to_le_bytes().to_vec());
                     args.push(0_u64.to_le_bytes().to_vec());
-
+                
                     if pool.y_address == second_pool.x_address
-                        || pool.y_address == second_pool.y_address
+                          || pool.y_address == second_pool.y_address
                     {
                         args.push(0_u8.to_le_bytes().to_vec());
                         type_tags.push(TypeTag::Struct(Box::new(
@@ -280,18 +294,18 @@ pub async fn transactor(routes: &mut kanal::AsyncReceiver<HashSet<(String, Vec<P
                         } else {
                             &first_pool.y_address
                         })
-                        .unwrap(),
+                              .unwrap(),
                     )));
                     function = "three_step_route"
                 }
-
+            
                 type_tags.push(TypeTag::Struct(Box::new(
                     StructTag::from_str(if first_pool.x_to_y {
                         &first_pool.x_address
                     } else {
                         &first_pool.y_address
                     })
-                    .unwrap(),
+                          .unwrap(),
                 )));
                 type_tags.push(TypeTag::Struct(Box::new(
                     StructTag::from_str(if first_pool.x_to_y {
@@ -299,9 +313,9 @@ pub async fn transactor(routes: &mut kanal::AsyncReceiver<HashSet<(String, Vec<P
                     } else {
                         &first_pool.y_address
                     })
-                    .unwrap(),
+                          .unwrap(),
                 )));
-
+            
                 if first_pool.curve.is_some() {
                     let first_extra_index = if function == "two_step_route" { 3 } else { 4 };
                     std::mem::replace(
@@ -331,26 +345,26 @@ pub async fn transactor(routes: &mut kanal::AsyncReceiver<HashSet<(String, Vec<P
                         );
                     }
                 }
-                
+            
                 // TODO: get price of tokens for non APT arbs
                 let max_gas_units = MAX_GAS_UNITS.clone();
-    
-                let decimals = decimals(in_token.clone());
-                args.push((QTY.clone() * 10_u64.pow(decimals as u32)).to_le_bytes().to_vec());
-                
+            
+                let decimals = order.decimals;
+                args.push((order.size * 10_u64.pow(decimals as u32)).to_le_bytes().to_vec());
+            
                 let tx_f =
-                    aptos_sdk::transaction_builder::TransactionFactory::new(ChainId::new(1_u8));
+                      aptos_sdk::transaction_builder::TransactionFactory::new(ChainId::new(1_u8));
                 let aptos_client =
-                      Client::new_with_timeout(NODE_URLS.get(i % NODE_URLS.len()).unwrap().clone(), Duration::from_secs(20));
+                      Client::new_with_timeout(NODE_URLS.get(0).unwrap().clone(), Duration::from_secs(20));
                 // simulate and try when it works
-                'sim_loop: loop {
+                'sim_loop: for _ in 0..3 {
                     let permit = requests.acquire().await.unwrap();
-                   
-                    
+                
+                
                     let gas_unit = gas_unit_price.read().await;
                     let mut args = args.clone();
                     args.push(
-                        (QTY.clone() * 10_u64.pow(decimals as u32) + (max_gas_units * *gas_unit))
+                        (order.size * 10_u64.pow(decimals as u32) + (max_gas_units * *gas_unit))
                               .to_le_bytes()
                               .to_vec(),
                     );
@@ -372,25 +386,24 @@ pub async fn transactor(routes: &mut kanal::AsyncReceiver<HashSet<(String, Vec<P
                     // println!("tx: {:?}", tx);
                     let signed_tx = KEY.sign_transaction(tx);
                     let sim_result = aptos_client
-                        .simulate_bcs_with_gas_estimation(&signed_tx, true, true)
-                        .await;
+                          .simulate_bcs_with_gas_estimation(&signed_tx, true, true)
+                          .await;
                     if let Ok(result) = sim_result {
                         std::mem::drop(permit);
-                        
+                    
                         match result.into_inner().info {
                             TransactionInfo::V0(info) => {
-                                
                                 match info.status() {
                                     ExecutionStatus::Success => {
-                                        if info.gas_used() > max_gas_units  {
+                                        if info.gas_used() > max_gas_units {
                                             continue 'sim_loop;
                                         }
-                                        
+                                    
                                         // send the transaction
                                         let result = aptos_client.submit_bcs(&signed_tx).await;
                                         if let Ok(result) = result {
                                             println!("`````````````````````` Tried Route ``````````````````````");
-                                            for (i, pool) in route.iter().enumerate() {
+                                            for (i, pool) in order.route.iter().enumerate() {
                                                 println!("{}. {}", i + 1, pool);
                                             }
                                             println!("\n\n");
@@ -401,8 +414,7 @@ pub async fn transactor(routes: &mut kanal::AsyncReceiver<HashSet<(String, Vec<P
                                             println!("error: {:?}", result.unwrap_err());
                                         }
                                     }
-                                    ExecutionStatus::OutOfGas => {
-                                    }
+                                    ExecutionStatus::OutOfGas => {}
                                     ExecutionStatus::MoveAbort {
                                         location,
                                         code,
@@ -410,13 +422,13 @@ pub async fn transactor(routes: &mut kanal::AsyncReceiver<HashSet<(String, Vec<P
                                     } => {
                                         if let Some(info) = info {
                                             if info.reason_name == "ECOIN_STORE_NOT_PUBLISHED" {
-                                                for (i, pool) in route.iter().enumerate() {
+                                                for (i, pool) in order.route.iter().enumerate() {
                                                     println!("{}. {}", i + 1, pool);
                                                 }
                                                 println!("\n\n");
                                                 continue 'sim_loop;
                                             }
-                                            if info.reason_name == "E_OUTPUT_LESS_THAN_MINIMUM" || info.reason_name == "ERROR_INSUFFICIENT_OUTPUT_AMOUNT" || info.reason_name == "ERR_INSUFFICIENT_OUTPUT_AMOUNT"{
+                                            if info.reason_name == "E_OUTPUT_LESS_THAN_MINIMUM" || info.reason_name == "ERROR_INSUFFICIENT_OUTPUT_AMOUNT" || info.reason_name == "ERR_INSUFFICIENT_OUTPUT_AMOUNT" {
                                                 continue 'sim_loop;
                                             }
                                             if info.reason_name == "EINSUFFICIENT_LIQUIDITY" || info.reason_name == "EPOOL_NOT_FOUND" || info.reason_name == "E_PAIR_NOT_CREATED" || info.reason_name == "ERR_INCORRECT_SWAP" || info.reason_name == "ERR_COIN_TYPE_SAME_ERROR" {
@@ -427,14 +439,12 @@ pub async fn transactor(routes: &mut kanal::AsyncReceiver<HashSet<(String, Vec<P
                                             }
                                         }
                                         println!("MoveAbort: {:?} {:?} {:?}", location, code, info);
-    
                                     }
                                     ExecutionStatus::ExecutionFailure {
                                         location,
                                         function,
                                         code_offset,
                                     } => {
-                                       
                                         if (*function == 67 && *code_offset == 10) || (*function == 63 && *code_offset == 10) || (*function == 44 && *code_offset == 39) {
                                             let mut w = total_tasks.write().await;
                                             *w -= 1;
@@ -459,7 +469,7 @@ pub async fn transactor(routes: &mut kanal::AsyncReceiver<HashSet<(String, Vec<P
                         }
                     } else {
                         std::mem::drop(permit);
-                        eprintln!("sim_result: {:?} {}", sim_result.unwrap_err(), NODE_URLS.get(i % NODE_URLS.len()).unwrap().clone());
+                        eprintln!("sim_result: {:?} {}", sim_result.unwrap_err(), NODE_URLS.get(0).unwrap().clone());
                     }
                 }
             }));
@@ -471,11 +481,3 @@ pub async fn transactor(routes: &mut kanal::AsyncReceiver<HashSet<(String, Vec<P
 }
 
 // this is going to be too slow, find a better way to do this
-fn decimals(coin: String) -> u64 {
-    match coin.as_str() {
-        "0x0000000000000000000000000000000000000000000000000000000000000001::aptos_coin::AptosCoin" => {
-            8
-        }
-        _ => {6}
-    }
-}
