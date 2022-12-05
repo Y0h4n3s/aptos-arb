@@ -207,31 +207,35 @@ pub async fn transactor(routes: &mut kanal::AsyncReceiver<Order>) {
                 let first_pool = order.route.first().unwrap();
                 let second_pool = order.route.get(1).unwrap();
                 let third_pool = order.route.get(2);
-                let mut function = "two_step_route";
+                let mut function: u8 = 2;
                 let mut type_tags: Vec<TypeTag> = vec![];
                 let mut args = vec![];
+                args.push(function.to_le_bytes().to_vec());
                 args.push(
                     (&(first_pool.clone().provider as u8))
                           .to_le_bytes()
                           .to_vec(),
                 );
                 args.push(0_u64.to_le_bytes().to_vec());
-                args.push(1_u8.to_le_bytes().to_vec());
-            
+                
                 if first_pool.x_to_y {
+                    args.push(1_u8.to_le_bytes().to_vec());
                     type_tags.push(TypeTag::Struct(Box::new(
                         StructTag::from_str(&first_pool.x_address).unwrap(),
                     )));
                     type_tags.push(TypeTag::Struct(Box::new(
                         StructTag::from_str(&first_pool.y_address).unwrap(),
                     )));
+    
                 } else {
+                    args.push(0_u8.to_le_bytes().to_vec());
                     type_tags.push(TypeTag::Struct(Box::new(
                         StructTag::from_str(&first_pool.y_address).unwrap(),
                     )));
                     type_tags.push(TypeTag::Struct(Box::new(
                         StructTag::from_str(&first_pool.x_address).unwrap(),
                     )));
+    
                 }
                 args.push(
                     (&(second_pool.clone().provider as u8))
@@ -239,68 +243,87 @@ pub async fn transactor(routes: &mut kanal::AsyncReceiver<Order>) {
                           .to_vec(),
                 );
                 args.push(0_u64.to_le_bytes().to_vec());
-            
-                if second_pool.y_address == first_pool.x_address
-                      || second_pool.y_address == first_pool.y_address
+                let mut second = 0_u8;
+                if third_pool.is_none()
                 {
-                    args.push(0_u8.to_le_bytes().to_vec());
                     type_tags.push(TypeTag::Struct(Box::new(
-                        StructTag::from_str(&second_pool.x_address).unwrap(),
+                        StructTag::from_str("0x1::string::String").unwrap(),
                     )));
                 } else {
-                    args.push(1_u8.to_le_bytes().to_vec());
+                    if second_pool.x_address != first_pool.x_address && second_pool.x_address != first_pool.y_address {
+                        type_tags.push(TypeTag::Struct(Box::new(
+                            StructTag::from_str(&second_pool.x_address).unwrap(),
+                        )));
+                    }
+                    else {
                     type_tags.push(TypeTag::Struct(Box::new(
                         StructTag::from_str(&second_pool.y_address).unwrap(),
                     )));
                 }
+                }
+                if third_pool.is_none() {
+                    if second_pool.x_to_y {
+                        args.push(1_u8.to_le_bytes().to_vec());
+    
+                    } else {
+                        args.push(0_u8.to_le_bytes().to_vec());
+                    }
+                } else {
+                    if second_pool.x_address != first_pool.x_address && second_pool.x_address != first_pool.y_address {
+                        args.push(0_u8.to_le_bytes().to_vec());
+        
+                    } else {
+        
+                        args.push(1_u8.to_le_bytes().to_vec());
+                        second = 1_u8;
+        
+                    }
+                }
+                
             
                 if let Some(pool) = third_pool.clone() {
                     args.push((&(pool.clone().provider as u8)).to_le_bytes().to_vec());
                     args.push(0_u64.to_le_bytes().to_vec());
-                
-                    if pool.y_address == second_pool.x_address
-                          || pool.y_address == second_pool.y_address
-                    {
+    
+                    if pool.x_address != second_pool.x_address && pool.x_address != second_pool.y_address {
                         args.push(0_u8.to_le_bytes().to_vec());
-                        type_tags.push(TypeTag::Struct(Box::new(
-                            StructTag::from_str(&pool.x_address).unwrap(),
-                        )));
-                    } else {
-                        args.push(1_u8.to_le_bytes().to_vec());
-                        type_tags.push(TypeTag::Struct(Box::new(
-                            StructTag::from_str(&pool.y_address).unwrap(),
-                        )));
+    
                     }
+                    else {
+                        args.push(1_u8.to_le_bytes().to_vec());
+    
+                    }
+                    
+                    function = 3
+                } else {
+                    args.push(0_u8.to_le_bytes().to_vec());
+                    args.push(0_u64.to_le_bytes().to_vec());
+    
+                    args.push(second.to_le_bytes().to_vec());
+                }
+                if first_pool.x_to_y {
                     type_tags.push(TypeTag::Struct(Box::new(
-                        StructTag::from_str(if first_pool.x_to_y {
-                            &first_pool.x_address
-                        } else {
-                            &first_pool.y_address
-                        })
+                        StructTag::from_str(&first_pool.x_address).unwrap(),
+                    )));
+        
+        
+                } else {
+                    type_tags.push(TypeTag::Struct(Box::new(
+                        StructTag::from_str(&first_pool.y_address).unwrap(),
+                    )));
+        
+                }
+
+                for _i in 0..3 {
+                    type_tags.push(TypeTag::Struct(Box::new(
+                        StructTag::from_str("0x1::string::String")
                               .unwrap(),
                     )));
-                    function = "three_step_route"
                 }
-            
-                type_tags.push(TypeTag::Struct(Box::new(
-                    StructTag::from_str(if first_pool.x_to_y {
-                        &first_pool.x_address
-                    } else {
-                        &first_pool.y_address
-                    })
-                          .unwrap(),
-                )));
-                type_tags.push(TypeTag::Struct(Box::new(
-                    StructTag::from_str(if first_pool.x_to_y {
-                        &first_pool.x_address
-                    } else {
-                        &first_pool.y_address
-                    })
-                          .unwrap(),
-                )));
+                
             
                 if first_pool.curve.is_some() {
-                    let first_extra_index = if function == "two_step_route" { 3 } else { 4 };
+                    let first_extra_index =  4 ;
                     std::mem::replace(
                         &mut type_tags[first_extra_index],
                         TypeTag::Struct(Box::new(
@@ -309,7 +332,7 @@ pub async fn transactor(routes: &mut kanal::AsyncReceiver<Order>) {
                     );
                 }
                 if second_pool.curve.is_some() {
-                    let second_extra_index = if function == "two_step_route" { 4 } else { 5 };
+                    let second_extra_index =  5 ;
                     std::mem::replace(
                         &mut type_tags[second_extra_index],
                         TypeTag::Struct(Box::new(
@@ -328,7 +351,12 @@ pub async fn transactor(routes: &mut kanal::AsyncReceiver<Order>) {
                         );
                     }
                 }
-            
+                
+               
+                std::mem::replace(
+                    &mut args[0],
+                    function.to_le_bytes().to_vec(),
+                );
                 // TODO: get price of tokens for non APT arbs
                 let max_gas_units = MAX_GAS_UNITS.clone();
             
@@ -340,7 +368,7 @@ pub async fn transactor(routes: &mut kanal::AsyncReceiver<Order>) {
                 let aptos_client =
                       Client::new_with_timeout(NODE_URLS.get(0).unwrap().clone(), Duration::from_secs(20));
                 // simulate and try when it works
-                'sim_loop: for _ in 0..5 {
+                'sim_loop: for _ in 0..1 {
                     let permit = requests.acquire().await.unwrap();
                 
                 
@@ -351,14 +379,15 @@ pub async fn transactor(routes: &mut kanal::AsyncReceiver<Order>) {
                               .to_le_bytes()
                               .to_vec(),
                     );
+                    
                     std::mem::drop(gas_unit);
                     let seq_num = sequence_number.read().await;
                     let tx = tx_f.payload(TransactionPayload::EntryFunction(
                         EntryFunction::new(
                             ModuleId::new(AccountAddress::from_str("0x89576037b3cc0b89645ea393a47787bb348272c76d6941c574b053672b848039").unwrap(), Identifier::new("aggregator").unwrap()),
-                            Identifier::new(function).unwrap(),
+                            Identifier::new("swap").unwrap(),
                             type_tags.clone(),
-                            args
+                            args.clone()
                         )
                     ))
                                  .sender(KEY.address())
@@ -402,7 +431,7 @@ pub async fn transactor(routes: &mut kanal::AsyncReceiver<Order>) {
                                         code,
                                         info,
                                     } => {
-    
+                                        
                                         if let Some(info) = info {
                                             if info.reason_name == "ECOIN_STORE_NOT_PUBLISHED" {
                                                 for (i, pool) in order.route.iter().enumerate() {
@@ -420,6 +449,8 @@ pub async fn transactor(routes: &mut kanal::AsyncReceiver<Order>) {
                                         }
                                         eprintln!("MoveAbort: {:?} {:?} {:?}", location, code, info);
     
+    
+    
                                     }
                                     ExecutionStatus::ExecutionFailure {
                                         location,
@@ -429,6 +460,7 @@ pub async fn transactor(routes: &mut kanal::AsyncReceiver<Order>) {
                                         if (*function == 67 && *code_offset == 10) || (*function == 63 && *code_offset == 10) || (*function == 44 && *code_offset == 39) {
                                             break 'sim_loop;
                                         }
+                                       
                                         eprintln!(
                                             "ExecutionFailure: {:?} {:?} {:?}",
                                             location, function, code_offset
