@@ -16,7 +16,7 @@ use crate::Meta;
 use crate::NODE_URL;
 use crate::events::{EventEmitter};
 use crate::types::{AptoswapPool, AuxAmmPool, CoinStoreResource};
-#[derive(Clone)]
+#[derive(Debug, Eq, PartialEq, Clone)]
 pub struct AptoswapMetadata {
 	pub contract_address: String,
 	pub pool_module: String,
@@ -167,12 +167,13 @@ impl LiquidityProvider for Aptoswap {
 									  + ">",
 								x_address: coin_x.clone(),
 								y_address: coin_y.clone(),
+								fee_bps: amm.lp_fee.0,
 								curve: None,
 								x_amount: amm.x.value.0,
 								y_amount: amm.y.value.0,
 								events_sources: vec![],
 								x_to_y: true,
-								provider: LiquidityProviders::Aux
+								provider: LiquidityProviders::Aptoswap
 							};
 							// Get the pool's event source from resources
 							

@@ -8,6 +8,8 @@ mod types;
 
 use std::collections::HashMap;
 use std::fmt::Display;
+use spl_math::checked_ceil_div::CheckedCeilDiv;
+use num_traits::cast::ToPrimitive;
 use std::hash::Hash;
 use std::str::FromStr;
 use std::time::Duration;
@@ -120,38 +122,58 @@ impl From<u8> for LiquidityProviders {
 pub type BoxedLiquidityProvider = Box<dyn LiquidityProvider<Metadata = Box<dyn Meta>, EventType = Box<dyn EventSource<Event = Pool>>> + Send>;
 
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Calculator {
+pub trait Calculator {
+    fn calculate_out(&self,in_: u64, pool: &Pool) -> u64;
 }
 
-impl Calculator {
-    pub fn new() -> Self {
+pub struct CpmmCalculator {
+
+}
+
+impl CpmmCalculator {
+    fn new() -> Self {
         Self {}
     }
-    
-    pub fn get_x_to_y(&self, x: u64, x_reserve: u64, y_reserve: u64) -> u64 {
-        let x = x as f64;
-        let x_reserve = x_reserve as f64;
-        let y_reserve = y_reserve as f64;
-        let invariant = x_reserve * y_reserve;
-        let new_x_reserve = x_reserve + x;
-        let new_y_reserve = invariant / new_x_reserve;
-        let y = y_reserve - new_y_reserve;
-        y as u64
-    }
-    
-    // find the optimal size with convex optimization
-    pub fn get_optimal_size(&self, x_reserve: u64, y_reserve: u64, x_amount: u64) -> u64 {
-        let x_reserve = x_reserve as f64;
-        let y_reserve = y_reserve as f64;
-        let x_amount = x_amount as f64;
-        let y_amount = (x_amount * y_reserve) / (x_reserve + x_amount);
-        let x_amount = (y_amount * x_reserve) / (y_reserve - y_amount);
-        x_amount as u64
+}
+
+
+impl Calculator for CpmmCalculator {
+    fn calculate_out(&self, in_: u64, pool: &Pool) -> u64 {
+        let swap_source_amount = if pool.x_to_y {
+            pool.x_amount
+        } else {
+            pool.y_amount
+        };
+        let swap_destination_amount = if pool.x_to_y {
+            pool.y_amount
+        } else {
+            pool.x_amount
+        };
+        if in_ >= swap_source_amount {
+            return swap_destination_amount;
+        }
+        let amount_in_with_fee = (in_ as u128) * ((10000 - pool.fee_bps) as u128);
+        let numerator = amount_in_with_fee.checked_mul(swap_destination_amount as u128).unwrap_or(0);
+        let denominator = ((swap_source_amount as u128) * 10000) + amount_in_with_fee;
+        ((numerator / denominator) as u64)
     }
 }
 
+
+
 impl LiquidityProviders  {
+    pub fn build_calculator(&self) -> Box<dyn Calculator> {
+        match *self {
+            LiquidityProviders::LiquidSwap => Box::new(CpmmCalculator::new()),
+            LiquidityProviders::Aptoswap => Box::new(CpmmCalculator::new()),
+            LiquidityProviders::Aux => Box::new(CpmmCalculator::new()),
+            LiquidityProviders::AnimeSwap => Box::new(CpmmCalculator::new()),
+            LiquidityProviders::Cetue => Box::new(CpmmCalculator::new()),
+            LiquidityProviders::PancakeSwap => Box::new(CpmmCalculator::new()),
+            LiquidityProviders::Obric => Box::new(CpmmCalculator::new()),
+            _ => panic!("Invalid liquidity provider"),
+        }
+    }
     pub fn build(&self) -> BoxedLiquidityProvider {
         match *self {
             LiquidityProviders::Aux => {
@@ -205,6 +227,7 @@ pub struct Pool {
     pub x_address: String,
     pub y_address: String,
     pub curve: Option<String>,
+    pub fee_bps: u64,
     pub x_amount: u64,
     pub y_amount: u64,
     pub events_sources: Vec<IEventHandle>,
@@ -236,7 +259,8 @@ impl From<&Pool> for Pool {
             y_amount: pool.y_amount,
             events_sources: pool.events_sources.clone(),
             x_to_y: pool.x_to_y,
-            provider: pool.provider.clone()
+            provider: pool.provider.clone(),
+            fee_bps: pool.fee_bps,
         }
     }
 }

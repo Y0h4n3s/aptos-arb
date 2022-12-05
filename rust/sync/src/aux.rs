@@ -166,6 +166,7 @@ impl LiquidityProvider for Aux {
 									  + coin_y.as_str()
 									  + ">",
 								x_address: coin_x.clone(),
+								fee_bps: amm.fee_bps.0,
 								y_address: coin_y.clone(),
 								curve: None,
 								x_amount: amm.x_reserve.value.0,

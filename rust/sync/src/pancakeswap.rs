@@ -167,11 +167,12 @@ impl LiquidityProvider for PancakeSwap {
 								x_address: coin_x.clone(),
 								y_address: coin_y.clone(),
 								curve: None,
+								fee_bps: 150,
 								x_amount: amm.balance_x.value.0,
 								y_amount: amm.balance_y.value.0,
 								events_sources: vec![],
 								x_to_y: true,
-								provider: LiquidityProviders::Aux
+								provider: LiquidityProviders::PancakeSwap
 							};
 							// Get the pool's event source from resources
 							

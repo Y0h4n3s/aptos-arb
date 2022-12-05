@@ -122,6 +122,9 @@ pub async fn start(
             })
             .is_none()
         {
+            if pool.address == "0xc7ea756470f72ae761b7986e4ed6fd409aad183b1b2d3d2f674d979852f45c4b::piece_swap::PieceSwapPoolInfo<0x1::aptos_coin::AptosCoin, 0x5e156f1207d0ebfa19a9eeff00d62a282278fb8719f4fab3a586a0a2c0fffbea::coin::T>" {
+                println!("adding edge {:?} {:?}", i1, i2);
+            }
             the_graph.add_edge(i1, i2, pool.clone());
         }
     }
@@ -215,7 +218,7 @@ pub async fn start(
         let path_lookup = path_lookup.clone();
         tokio::spawn(async move {
             let edge = the_graph.edge_weight(edge).unwrap();
-
+            
             let index1 = the_graph
                 .node_indices()
                 .find(|i| the_graph[*i] == edge.x_address)
@@ -242,9 +245,10 @@ pub async fn start(
                         node,
                         *checked_coin,
                         0,
-                        Some(2),
+                        Some(1),
                     )
                     .collect::<Vec<_>>();
+                    
                     for (i, ni) in to_checked_paths.iter().enumerate() {
                         for (j, nj) in to_checked_paths.iter().enumerate() {
                             // skip routing back and forth
@@ -316,7 +320,6 @@ pub async fn start(
                 }
             }
             // use only paths that route through the current edge
-            // println!("Total Paths for {:?}: {}", edge.address, safe_paths.len());
             safe_paths = safe_paths
                 .into_iter()
                 .filter(|(_in, path)| {
@@ -324,6 +327,7 @@ pub async fn start(
                         p.address == edge.address
                             && p.x_address == edge.x_address
                             && p.y_address == edge.y_address
+                        && p.provider == edge.provider
                     })
                 })
                 .collect();
@@ -335,6 +339,7 @@ pub async fn start(
                         p.address == edge.address
                             && p.x_address == edge.x_address
                             && p.y_address == edge.y_address
+                        && p.provider == edge.provider
                     })
                 })
                 .map(|(in_addr, path)| {
@@ -375,7 +380,7 @@ pub async fn start(
                 let path_lookup = path_lookup.clone();
                 let routes = routes.clone();
                 tokio::task::spawn_local(async move {
-                    if let Some(market_routes) = path_lookup.read().await.get(&updated_market) {
+                    if let Some((pool, market_routes)) = path_lookup.read().await.iter().find(|(key, value)|updated_market.address == key.address && updated_market.x_address == key.x_address && updated_market.y_address == key.y_address && updated_market.provider == key.provider) {
                         if market_routes.len() <= 0 {
                             return;
                         }
@@ -384,39 +389,33 @@ pub async fn start(
                         //     market_routes.len(),
                         //     updated_market
                         // );
-                        let calculator = Calculator::new();
                         for (pool_addr, paths) in market_routes.iter() {
+                            if !paths.contains(pool) {
+                                continue
+                            }
                             let in_addr = if paths.first().unwrap().x_to_y {
                                 paths.first().unwrap().x_address.clone()
                             } else {
                                 paths.first().unwrap().y_address.clone()
                             };
+                            let decimals = decimals(in_addr);
                     
-                            let optimal_in = calculator.get_optimal_size(paths.first().unwrap().x_amount, paths.first().unwrap().y_amount,120, );
                             let mut best_route_index = 0;
                             let mut best_route = 0.0;
                             for i in 1..120 {
-                                let mut in_ = i as u64;
-                                let increace_percent = 0.0;
+                                let i_atomic = (i as u64) * 10_u64.pow(decimals as u32);
+                                let mut in_ = i_atomic;
                                 for route in paths {
-                                    let x = if route.x_to_y {
-                                        route.x_amount
-                                    } else {
-                                        route.y_amount
-                                    };
-                                    let y = if route.x_to_y {
-                                        route.y_amount
-                                    } else {
-                                        route.x_amount
-                                    };
-                                    in_ = calculator.get_x_to_y(in_, x, y);
+                                    let calculator = route.provider.build_calculator();
+                                   
+                                    in_ = calculator.calculate_out(in_, route);
                                 }
-                                if in_ < i {
+                                if in_ < i_atomic {
                                     continue;
                                 }
                         
-                                let percent = in_ as f64 - i as f64;
-                                // println!("{}: {} {} {}", i, in_, percent, optimal_in);
+                                let percent = in_ as f64 - i_atomic as f64;
+                                // println!("{}: {} {} {} {}", i, in_, percent, i_atomic, paths.iter().map(|p| format!("{:?}", p.provider.clone())).collect::<Vec<String>>().join("->"));
 
                                 if percent > best_route {
                                     best_route = percent;
@@ -426,19 +425,20 @@ pub async fn start(
                             
                             if best_route > 0.0 {
                                 // println!(
-                                //     "graph service> {}% increase for size {} -> {}",
+                                //     "graph service> {} increase for size {} -> {}",
                                 //     best_route, best_route_index, pool_addr
                                 // );
                                 
                                 let order = Order {
                                     size: best_route_index as u64,
-                                    decimals: decimals(in_addr),
+                                    decimals,
                                     route: paths.clone(),
                                 };
-                                // for (i, pool) in order.route.iter().enumerate() {
-                                //     println!("{}. {}", i + 1, pool);
-                                // }
-                                // println!("\n\n");
+                                println!("graph service> trying size {:?} on route", order.size);
+                                for (i, pool) in order.route.iter().enumerate() {
+                                    println!("{}. {}", i + 1, pool);
+                                }
+                                println!("\n\n");
                                 let mut r = routes.write().await;
                                 let s = r.try_send(order).unwrap();
                             }
@@ -447,7 +447,7 @@ pub async fn start(
                         }
                 
                     } else {
-                        // eprintln!("graph service> No routes found for {}", updated_market);
+                        eprintln!("graph service> No routes found for {}", updated_market);
                     }
                 });
             }

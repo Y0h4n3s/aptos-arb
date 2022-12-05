@@ -167,12 +167,13 @@ impl LiquidityProvider for Cetue {
 									  + ">",
 								x_address: coin_x.clone(),
 								y_address: coin_y.clone(),
+								fee_bps: 200,
 								curve: None,
 								x_amount: amm.coin_a.value.0,
 								y_amount: amm.coin_b.value.0,
 								events_sources: vec![],
 								x_to_y: true,
-								provider: LiquidityProviders::Aux
+								provider: LiquidityProviders::Cetue
 							};
 							// Get the pool's event source from resources
 							

@@ -151,7 +151,7 @@ impl LiquidityProvider for Obric {
 							};
 
 							let amm: ObricPieceSwapPoolInfo = serde_json::from_value(resource.data.clone()).unwrap();
-
+							
 							if amm.reserve_x.value.0 == 0 || amm.reserve_y.value.0 == 0 {
 								continue;
 							}
@@ -169,11 +169,12 @@ impl LiquidityProvider for Obric {
 								x_address: coin_x.clone(),
 								y_address: coin_y.clone(),
 								curve: None,
+								fee_bps: amm.swap_fee_per_million.0,
 								x_amount: amm.reserve_x.value.0,
 								y_amount: amm.reserve_y.value.0,
 								events_sources: vec![],
 								x_to_y: true,
-								provider: LiquidityProviders::Aux
+								provider: LiquidityProviders::Obric
 							};
 							// Get the pool's event source from resources
 							

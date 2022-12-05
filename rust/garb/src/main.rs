@@ -195,29 +195,35 @@ pub async fn transactor(routes: &mut kanal::AsyncReceiver<Order>) {
    
     let par_requests = Arc::new(tokio::sync::Semaphore::new(*PARALLEL_REQUESTS));
     let total_tasks = Arc::new(tokio::sync::RwLock::new(0_u64));
+    let active_tasks = Arc::new(tokio::sync::RwLock::new(0_u64));
     let t = total_tasks.clone();
+    let a = active_tasks.clone();
     let p = par_requests.clone();
     join_handles.push(tokio::spawn(async move {
         // print info
         loop {
             tokio::time::sleep(Duration::from_secs(30)).await;
             let tasks = t.read().await;
-            println!("tasks: {}, working tasks: {}/{}", tasks, *PARALLEL_REQUESTS - p.available_permits(), *PARALLEL_REQUESTS);
+            println!("total_tasks: {}, waiting_tasks: {}, working_tasks: {}/{}", tasks, a.read().await,*PARALLEL_REQUESTS - p.available_permits(), *PARALLEL_REQUESTS);
         }
     }));
     
     while let Ok(order) = routes.try_recv() {
+        
         if let Some(order) = order {
+            let mut w = total_tasks.write().await;
+            *w += 1;
+            std::mem::drop(w);
             if order.route.len() <= 0 {
                 continue;
             }
-            let mut w = total_tasks.write().await;
+            let mut w = active_tasks.write().await;
             *w += 1;
             std::mem::drop(w);
             let sequence_number = seq_number.clone();
             let gas_unit_price = gas_unit_price.clone();
             let requests = par_requests.clone();
-            let total_tasks = total_tasks.clone();
+            let active_tasks = active_tasks.clone();
             join_handles.push(tokio::spawn(async move {
             
                 // build the transaction
@@ -357,7 +363,7 @@ pub async fn transactor(routes: &mut kanal::AsyncReceiver<Order>) {
                 let aptos_client =
                       Client::new_with_timeout(NODE_URLS.get(0).unwrap().clone(), Duration::from_secs(20));
                 // simulate and try when it works
-                'sim_loop: for _ in 0..3 {
+                'sim_loop: for _ in 0..5 {
                     let permit = requests.acquire().await.unwrap();
                 
                 
@@ -420,6 +426,7 @@ pub async fn transactor(routes: &mut kanal::AsyncReceiver<Order>) {
                                         code,
                                         info,
                                     } => {
+    
                                         if let Some(info) = info {
                                             if info.reason_name == "ECOIN_STORE_NOT_PUBLISHED" {
                                                 for (i, pool) in order.route.iter().enumerate() {
@@ -432,13 +439,11 @@ pub async fn transactor(routes: &mut kanal::AsyncReceiver<Order>) {
                                                 continue 'sim_loop;
                                             }
                                             if info.reason_name == "EINSUFFICIENT_LIQUIDITY" || info.reason_name == "EPOOL_NOT_FOUND" || info.reason_name == "E_PAIR_NOT_CREATED" || info.reason_name == "ERR_INCORRECT_SWAP" || info.reason_name == "ERR_COIN_TYPE_SAME_ERROR" {
-                                                let mut w = total_tasks.write().await;
-                                                *w -= 1;
-                                                std::mem::drop(w);
                                                 break 'sim_loop;
                                             }
                                         }
                                         println!("MoveAbort: {:?} {:?} {:?}", location, code, info);
+    
                                     }
                                     ExecutionStatus::ExecutionFailure {
                                         location,
@@ -446,9 +451,6 @@ pub async fn transactor(routes: &mut kanal::AsyncReceiver<Order>) {
                                         code_offset,
                                     } => {
                                         if (*function == 67 && *code_offset == 10) || (*function == 63 && *code_offset == 10) || (*function == 44 && *code_offset == 39) {
-                                            let mut w = total_tasks.write().await;
-                                            *w -= 1;
-                                            std::mem::drop(w);
                                             break 'sim_loop;
                                         }
                                         println!(
@@ -472,6 +474,9 @@ pub async fn transactor(routes: &mut kanal::AsyncReceiver<Order>) {
                         eprintln!("sim_result: {:?} {}", sim_result.unwrap_err(), NODE_URLS.get(0).unwrap().clone());
                     }
                 }
+                let mut w = active_tasks.write().await;
+                *w -= 1;
+                std::mem::drop(w);
             }));
         }
     }
