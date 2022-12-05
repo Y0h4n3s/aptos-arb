@@ -1,3 +1,5 @@
+#![allow(unused_must_use)]
+
 use aptos_sdk::crypto::_once_cell::sync::Lazy;
 use aptos_sdk::crypto::ed25519::Ed25519PrivateKey;
 use aptos_sdk::crypto::ValidCryptoMaterialStringExt;
@@ -11,19 +13,16 @@ use aptos_sdk::types::transaction::{
 };
 use aptos_sdk::types::LocalAccount;
 use async_std::sync::Arc;
-use garb_sync_aptos::{EventSource, LiquidityProvider, LiquidityProviders, Pool, SyncConfig};
-use std::collections::{HashMap, HashSet};
+use garb_sync_aptos::{EventSource, LiquidityProviders, Pool, SyncConfig};
+use std::collections::{HashMap};
 use std::str::FromStr;
 use std::time::Duration;
 use aptos_sdk::types::vm_status::StatusCode;
 use tokio::runtime::Runtime;
 use tokio::sync::RwLock;
 use url::Url;
-use clap::Parser;
 use garb_graph_aptos::Order;
 
-// 0x7eb53ac5b9d0c6dd0b29da998a9c1d1e6f8592c677d8e601c1bbde4fcd0c1480
-// 0xfd2594ac71d95d1e86df9921d03ad2a409b871ee7f866560c21ff17945fd2fca
 static NODE_URLS: Lazy<Vec<Url>> = Lazy::new(|| {
     vec![ Url::from_str(
         std::env::var("APTOS_NODE_URL")
@@ -32,13 +31,6 @@ static NODE_URLS: Lazy<Vec<Url>> = Lazy::new(|| {
             .unwrap_or("http://val1.mainnet.aptos.p2p.org"),
     )
     .unwrap(),
-          // Url::from_str(
-          //     std::env::var("APTOS_NODE_URL")
-          //           .as_ref()
-          //           .map(|s| s.as_str())
-          //           .unwrap_or("https://rpc.argo.fi"),
-          // )
-          //       .unwrap(),
           Url::from_str(
               std::env::var("APTOS_NODE_URL")
                     .as_ref()
@@ -64,41 +56,26 @@ static KEY: Lazy<LocalAccount> = Lazy::new(|| {
 });
 
 static PARALLEL_REQUESTS: Lazy<usize> = Lazy::new(|| {
-    std::env::var("APTOS_PARALLEL_REQUESTS").unwrap_or_else(|_| std::env::args().nth(3).unwrap())
+    std::env::var("APTOS_PARALLEL_REQUESTS").unwrap_or_else(|_| std::env::args().nth(3).unwrap_or("100".to_string()))
         .parse()
         .unwrap_or(100)
 });
 
 static MAX_GAS_UNITS: Lazy<u64> = Lazy::new(|| {
-    std::env::var("APTOS_MAX_GAS_UNITS").unwrap_or_else(|_| std::env::args().nth(4).unwrap())
+    std::env::var("APTOS_MAX_GAS_UNITS").unwrap_or_else(|_| std::env::args().nth(4).unwrap_or("25000".to_string()))
                                             .parse()
                                             .unwrap_or(20000)
 });
 static PROVIDERS: Lazy<Vec<LiquidityProviders>> = Lazy::new(|| {
-    std::env::var("APTOS_PROVIDERS").unwrap_or_else(|_| std::env::args().nth(5).unwrap())
+    std::env::var("APTOS_PROVIDERS").unwrap_or_else(|_| std::env::args().nth(5).unwrap_or("8,11,12".to_string()))
         .split(",")
           .map(|s| s.parse::<u8>().unwrap())
           .map(|i| LiquidityProviders::from(i))
         .collect()
 });
-static QTY: Lazy<u64> = Lazy::new(|| {
-    std::env::var("APTOS_QTY").unwrap_or_else(|_| std::env::args().nth(5).unwrap())
-                                    .parse()
-                                    .unwrap_or(100)
-});
 
-//TODO: use message channels between sync and graph, and graph and routes
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let subscriber = tracing_subscriber::fmt()
-        .compact()
-        .with_file(true)
-        .with_line_number(true)
-        .with_thread_ids(true)
-        .with_target(true)
-        .finish();
-    tracing::subscriber::set_global_default(subscriber)?;
-
-    // let matches = Args::parse();
     let rt = Runtime::new()?;
     rt.block_on(async_main())?;
     Ok(())
@@ -130,7 +107,7 @@ pub async fn async_main() -> anyhow::Result<()> {
     let mut joins = vec![];
     
     joins.push(std::thread::spawn(move || {
-        let mut rt = Runtime::new().unwrap();
+        let rt = Runtime::new().unwrap();
        
         rt.block_on(async move {
             
@@ -139,7 +116,7 @@ pub async fn async_main() -> anyhow::Result<()> {
         });
     }));
     joins.push(std::thread::spawn(move || {
-        let mut rt = Runtime::new().unwrap();
+        let rt = Runtime::new().unwrap();
         rt.block_on(async move {
             transactor(&mut routes_receiver).await;
     
@@ -406,7 +383,7 @@ pub async fn transactor(routes: &mut kanal::AsyncReceiver<Order>) {
                                     
                                         // send the transaction
                                         let result = aptos_client.submit_bcs(&signed_tx).await;
-                                        if let Ok(result) = result {
+                                        if let Ok(_result) = result {
                                             println!("`````````````````````` Tried Route ``````````````````````");
                                             for (i, pool) in order.route.iter().enumerate() {
                                                 println!("{}. {}", i + 1, pool);
@@ -441,7 +418,7 @@ pub async fn transactor(routes: &mut kanal::AsyncReceiver<Order>) {
                                                 break 'sim_loop;
                                             }
                                         }
-                                        println!("MoveAbort: {:?} {:?} {:?}", location, code, info);
+                                        eprintln!("MoveAbort: {:?} {:?} {:?}", location, code, info);
     
                                     }
                                     ExecutionStatus::ExecutionFailure {
@@ -452,7 +429,7 @@ pub async fn transactor(routes: &mut kanal::AsyncReceiver<Order>) {
                                         if (*function == 67 && *code_offset == 10) || (*function == 63 && *code_offset == 10) || (*function == 44 && *code_offset == 39) {
                                             break 'sim_loop;
                                         }
-                                        println!(
+                                        eprintln!(
                                             "ExecutionFailure: {:?} {:?} {:?}",
                                             location, function, code_offset
                                         );
@@ -462,7 +439,7 @@ pub async fn transactor(routes: &mut kanal::AsyncReceiver<Order>) {
                                             if *code == StatusCode::SEQUENCE_NUMBER_TOO_NEW || *code == StatusCode::SEQUENCE_NUMBER_TOO_OLD {
                                                 continue 'sim_loop;
                                             }
-                                            println!("MiscellaneousError: {:?}", code);
+                                            eprintln!("MiscellaneousError: {:?}", code);
                                         }
                                     }
                                 }
@@ -483,5 +460,3 @@ pub async fn transactor(routes: &mut kanal::AsyncReceiver<Order>) {
         task.await.unwrap();
     }
 }
-
-// this is going to be too slow, find a better way to do this

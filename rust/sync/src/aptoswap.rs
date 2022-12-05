@@ -4,18 +4,17 @@ use tokio::sync::{RwLock};
 use tokio::runtime::Runtime;
 use async_std::sync::Arc;
 use async_trait::async_trait;
-use std::time::{Duration, SystemTime};
+use std::time::{Duration};
 use aptos_sdk::types::account_address::AccountAddress;
 use std::collections::HashMap;
 use kanal::AsyncSender;
-use aptos_sdk::move_types::language_storage::StructTag;
 use std::str::FromStr;
 use aptos_sdk::move_types::language_storage::TypeTag;
-use crate::{Calculator, EventSource, join_struct_tag_to_string, LiquidityProvider, LiquidityProviders, Pool};
+use crate::{EventSource, LiquidityProvider, LiquidityProviders, Pool};
 use crate::Meta;
 use crate::{NODE_URL, KNOWN_STABLECOINS};
 use crate::events::{EventEmitter};
-use crate::types::{AptoswapPool, AuxAmmPool, CoinStoreResource};
+use crate::types::{AptoswapPool};
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub struct AptoswapMetadata {
 	pub contract_address: String,
@@ -161,7 +160,7 @@ impl LiquidityProvider for Aptoswap {
 								continue
 							}
 							
-							let mut pool = Pool {
+							let pool = Pool {
 								address: metadata.contract_address.clone()
 									  + "::"
 									  + module
@@ -178,7 +177,6 @@ impl LiquidityProvider for Aptoswap {
 								curve: None,
 								x_amount: amm.x.value.0,
 								y_amount: amm.y.value.0,
-								events_sources: vec![],
 								x_to_y: true,
 								provider: LiquidityProviders::Aptoswap
 							};

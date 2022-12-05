@@ -1,7 +1,8 @@
+#![allow(non_snake_case)]
+
 use aptos_sdk::rest_client::aptos_api_types::{Address, U64};
 use aptos_sdk::rest_client::types::GUID;
 use serde::{Serialize, Deserialize};
-use aptos_sdk::types::event::EventKey;
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub struct AptosCoin {

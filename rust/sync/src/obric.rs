@@ -6,17 +6,15 @@ use async_std::sync::Arc;
 use std::time::Duration;
 use aptos_sdk::types::account_address::AccountAddress;
 use std::collections::HashMap;
-use std::time::SystemTime;
 use async_trait::async_trait;
 use kanal::AsyncSender;
-use aptos_sdk::move_types::language_storage::StructTag;
 use std::str::FromStr;
 use aptos_sdk::move_types::language_storage::TypeTag;
-use crate::{Calculator, EventSource, join_struct_tag_to_string, LiquidityProvider, LiquidityProviders, Pool};
+use crate::{ EventSource, LiquidityProvider, LiquidityProviders, Pool};
 use crate::Meta;
 use crate::{NODE_URL, KNOWN_STABLECOINS};
 use crate::events::{EventEmitter};
-use crate::types::{AuxAmmPool, CoinStoreResource, ObricPieceSwapPoolInfo};
+use crate::types::{ ObricPieceSwapPoolInfo};
 #[derive(Clone)]
 pub struct ObricMetadata {
 	pub contract_address: String,
@@ -162,7 +160,7 @@ impl LiquidityProvider for Obric {
 								continue
 							}
 							
-							let mut pool = Pool {
+							let pool = Pool {
 								address: metadata.contract_address.clone()
 									  + "::"
 									  + module
@@ -179,7 +177,6 @@ impl LiquidityProvider for Obric {
 								fee_bps: amm.swap_fee_per_million.0,
 								x_amount: amm.reserve_x.value.0,
 								y_amount: amm.reserve_y.value.0,
-								events_sources: vec![],
 								x_to_y: true,
 								provider: LiquidityProviders::Obric
 							};

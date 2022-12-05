@@ -8,15 +8,13 @@ use std::time::Duration;
 use aptos_sdk::types::account_address::AccountAddress;
 use std::collections::HashMap;
 use kanal::AsyncSender;
-use aptos_sdk::move_types::language_storage::StructTag;
 use std::str::FromStr;
 use aptos_sdk::move_types::language_storage::TypeTag;
-use std::time::SystemTime;
-use crate::{Calculator, EventSource, join_struct_tag_to_string, LiquidityProvider, LiquidityProviders, Pool};
+use crate::{EventSource, LiquidityProvider, LiquidityProviders, Pool};
 use crate::Meta;
 use crate::{NODE_URL, KNOWN_STABLECOINS};
 use crate::events::{EventEmitter};
-use crate::types::{AuxAmmPool, CoinStoreResource, PancakeTokenPairMetadata};
+use crate::types::{PancakeTokenPairMetadata};
 #[derive(Clone)]
 pub struct PancakeSwapMetadata {
 	pub contract_address: String,
@@ -160,7 +158,7 @@ impl LiquidityProvider for PancakeSwap {
 								continue
 							}
 							
-							let mut pool = Pool {
+							let pool = Pool {
 								address: metadata.contract_address.clone()
 									  + "::"
 									  + module
@@ -177,7 +175,6 @@ impl LiquidityProvider for PancakeSwap {
 								fee_bps: 25,
 								x_amount: amm.balance_x.value.0,
 								y_amount: amm.balance_y.value.0,
-								events_sources: vec![],
 								x_to_y: true,
 								provider: LiquidityProviders::PancakeSwap
 							};

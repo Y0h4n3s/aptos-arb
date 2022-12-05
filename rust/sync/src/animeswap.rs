@@ -5,18 +5,16 @@ use tokio::runtime::Runtime;
 use async_std::sync::Arc;
 use std::time::Duration;
 use aptos_sdk::types::account_address::AccountAddress;
-use std::time::SystemTime;
 use std::collections::HashMap;
 use kanal::AsyncSender;
 use async_trait::async_trait;
-use aptos_sdk::move_types::language_storage::StructTag;
 use std::str::FromStr;
 use aptos_sdk::move_types::language_storage::TypeTag;
-use crate::{Calculator, EventSource, join_struct_tag_to_string, KNOWN_STABLECOINS, LiquidityProvider, LiquidityProviders, Pool};
+use crate::{EventSource, KNOWN_STABLECOINS, LiquidityProvider, LiquidityProviders, Pool};
 use crate::Meta;
 use crate::NODE_URL;
 use crate::events::{EventEmitter};
-use crate::types::{AnimeswapLiquidityPool, AuxAmmPool, CoinStoreResource};
+use crate::types::{AnimeswapLiquidityPool};
 #[derive(Clone)]
 pub struct AnimeswapMetadata {
 	pub contract_address: String,
@@ -72,14 +70,14 @@ impl EventEmitter for Animeswap {
 						loop {
 							if let Ok(pool_resource_option) = aptos_client.get_account_resource(AccountAddress::from_str(resource_address).unwrap(), &pool.address).await {
 								if let Some(pool_resource) = pool_resource_option.inner() {
-									let amm: AuxAmmPool = serde_json::from_value(pool_resource.data.clone()).unwrap();
+									let amm: AnimeswapLiquidityPool = serde_json::from_value(pool_resource.data.clone()).unwrap();
 									if value.is_none() {
 										value = Some(amm);
 										continue;
 									}
 									if value.as_ref().unwrap().ne(&amm) {
-										pool.x_amount = amm.x_reserve.value.0;
-										pool.y_amount = amm.y_reserve.value.0;
+										pool.x_amount = amm.coin_x_reserve.value.0;
+										pool.y_amount = amm.coin_y_reserve.value.0;
 										value = Some(amm);
 										let mut subscribers = subscribers.write().await;
 										for subscriber in subscribers.iter_mut() {
@@ -160,7 +158,7 @@ impl LiquidityProvider for Animeswap {
 									continue
 							}
 							
-							let mut pool = Pool {
+							let pool = Pool {
 								address: metadata.contract_address.clone()
 									  + "::"
 									  + module
@@ -177,7 +175,6 @@ impl LiquidityProvider for Animeswap {
 								curve: None,
 								x_amount: amm.coin_x_reserve.value.0,
 								y_amount: amm.coin_y_reserve.value.0,
-								events_sources: vec![],
 								x_to_y: true,
 								provider: LiquidityProviders::AnimeSwap
 							};

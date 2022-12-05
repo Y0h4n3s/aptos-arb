@@ -1,49 +1,13 @@
 use std::collections::{HashMap, HashSet};
 
 use async_std::sync::Arc;
-use garb_sync_aptos::Calculator;
 use garb_sync_aptos::{EventSource, Pool};
 use petgraph::algo::all_simple_paths;
 use petgraph::prelude::{Graph, NodeIndex};
 use petgraph::Undirected;
 use tokio::runtime::Runtime;
 use tokio::sync::{RwLock, Semaphore};
-use tokio::time::Duration;
 use once_cell::sync::Lazy;
-// fn find_new_cycles(mut path: Vec<NodeIndex>, graph: &Graph<String, Pool, Undirected>, mut cycles: Vec<Vec<NodeIndex>>) -> Vec<Vec<NodeIndex>>   {
-//         let start_node = path.first().unwrap().clone();
-//         let mut next_node: Option<NodeIndex> = None;
-//         let mut sub = vec![];
-//
-//         for edge in graph.edge_indices() {
-//             let (node1, node2) = graph.edge_endpoints(edge).unwrap();
-//             if start_node == node1 || start_node == node2 {
-//
-//                 if node1 == start_node {
-//                     next_node = Some(node2);
-//                 } else {
-//                     next_node = Some(node1);
-//                 }
-//                 if !path.contains(&next_node.unwrap()) {
-//                     sub.push(next_node.unwrap());
-//                     sub.append(&mut path);
-//                     cycles.append(&mut find_new_cycles(sub.clone(), graph, cycles.clone()));
-//                 } else if path.len() > 2 && next_node.unwrap() == *path.last().unwrap() {
-//                     println!("cycle found: {:?}", path);
-//                     cycles.push( path.clone());
-//                 }
-//
-//             }
-//         }
-//     return cycles.clone()
-//
-// }
-//
-// pub fn cycles_through(graph: &Graph<String, Pool, Undirected>, node: &NodeIndex) -> Vec<Vec<NodeIndex>> {
-//     let mut cycles = vec![];
-//     find_new_cycles(vec![*node], graph, cycles)
-//
-// }
 
 fn combinations<T>(v: &[T], k: usize) -> Vec<Vec<T>>
 where
@@ -81,10 +45,6 @@ pub async fn start(
     updated_q: kanal::AsyncReceiver<Box<dyn EventSource<Event = Pool>>>,
     routes: Arc<RwLock<kanal::AsyncSender<Order>>>,
 ) -> anyhow::Result<()> {
-    // This can be any token or coin but we use stable coins because they are used more as quote tokens
-    // if we want to arb staked apt for example
-    // 0x84d7aeef42d38a5ffc3ccef853e1b82e4958659d16a7de736a29c55fbbeb0114::staked_aptos_coin::StakedAptosCoin tAPT
-    // 0xd11107bdf0d6d7040c6c0bfbdecb6545191fdf13e8d8d259952f53e1713f61b5::staked_coin::StakedAptos stAPT
 
     let mut the_graph: Graph<String, Pool, Undirected> =
         Graph::<String, Pool, Undirected>::new_undirected();
@@ -140,7 +100,7 @@ pub async fn start(
         }
     
 
-    let mut path_lookup = Arc::new(RwLock::new(
+    let path_lookup = Arc::new(RwLock::new(
         HashMap::<Pool, HashSet<(String, Vec<Pool>)>>::new(),
     ));
     let mut two_step_routes = HashSet::<(String, Vec<Pool>)>::new();
@@ -359,10 +319,7 @@ pub async fn start(
     }
 
     println!("graph service> Found {} routes", total_paths);
-    // for (pool, paths) in path_lookup.read().await.iter() {
-    //     routes.send(paths.clone()).await.unwrap();
-    //     tokio::time::sleep(Duration::from_secs(2)).await;
-    // }
+
     std::thread::spawn(move || {
         let rt = Runtime::new().unwrap();
         let task_set = tokio::task::LocalSet::new();
@@ -372,7 +329,7 @@ pub async fn start(
                 let path_lookup = path_lookup.clone();
                 let routes = routes.clone();
                 tokio::task::spawn_local(async move {
-                    if let Some((pool, market_routes)) = path_lookup.read().await.iter().find(|(key, value)|updated_market.address == key.address && updated_market.x_address == key.x_address && updated_market.y_address == key.y_address && updated_market.provider == key.provider) {
+                    if let Some((pool, market_routes)) = path_lookup.read().await.iter().find(|(key, _value)|updated_market.address == key.address && updated_market.x_address == key.x_address && updated_market.y_address == key.y_address && updated_market.provider == key.provider) {
                         if market_routes.len() <= 0 {
                             return;
                         }
@@ -381,7 +338,7 @@ pub async fn start(
                         //     market_routes.len(),
                         //     updated_market
                         // );
-                        for (pool_addr, paths) in market_routes.iter() {
+                        for (_pool_addr, paths) in market_routes.iter() {
                             if !paths.contains(pool) {
                                 continue
                             }
@@ -407,7 +364,7 @@ pub async fn start(
                                 }
                         
                                 let percent = in_ as f64 - i_atomic as f64;
-                                // println!("{}: {} {} {} {}", i, in_, percent, i_atomic, paths.iter().map(|p| format!("{:?}", p.provider.clone())).collect::<Vec<String>>().join("->"));
+
 
                                 if percent > best_route {
                                     best_route = percent;
@@ -416,23 +373,15 @@ pub async fn start(
                             }
                             
                             if best_route > 0.0 {
-                                // println!(
-                                //     "graph service> {} increase for size {} -> {}",
-                                //     best_route, best_route_index, pool_addr
-                                // );
-                                
+
                                 let order = Order {
                                     size: best_route_index as u64,
                                     decimals,
                                     route: paths.clone(),
                                 };
-                                // println!("graph service> trying size {:?} on route", order.size);
-                                // for (i, pool) in order.route.iter().enumerate() {
-                                //     println!("{}. {}", i + 1, pool);
-                                // }
-                                // println!("\n\n");
-                                let mut r = routes.write().await;
-                                let s = r.try_send(order).unwrap();
+
+                                let r = routes.write().await;
+                                r.try_send(order).unwrap();
                             }
                     
                     

@@ -1,10 +1,9 @@
-use std::future::Future;
 use std::time::Duration;
 use kanal::{AsyncReceiver, AsyncSender};
 use async_trait::async_trait;
 use tokio::task::JoinHandle;
 use async_std::sync::Arc;
-use tokio::sync::{Barrier, RwLock};
+use tokio::sync::{RwLock};
 
 #[async_trait]
 pub trait EventSink {
