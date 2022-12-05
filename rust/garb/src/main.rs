@@ -389,7 +389,6 @@ pub async fn transactor(routes: &mut kanal::AsyncReceiver<Order>) {
                                  .max_gas_amount(max_gas_units)
                                  .build();
                     std::mem::drop(seq_num);
-                    // println!("tx: {:?}", tx);
                     let signed_tx = KEY.sign_transaction(tx);
                     let sim_result = aptos_client
                           .simulate_bcs_with_gas_estimation(&signed_tx, true, true)

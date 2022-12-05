@@ -11,6 +11,7 @@ path = "src/lib.rs"
 anyhow = "1.0.66"
 tokio = "1.17.0"
 petgraph = "0.6.0"
+once_cell = "1.16.0"
 async-std = "1.12.0"
 garb_sync_aptos = { path = "../sync" }
 num_cpus = "1.14.0"
