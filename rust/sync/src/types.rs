@@ -21,6 +21,34 @@ pub struct EventHandle {
 	guid: GUID
 }
 
+
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq)]
+pub struct LiquidswapLiquidityPool {
+	pub coin_x_reserve: AptosCoin,
+	pub coin_y_reserve: AptosCoin,
+	pub dao_fee: U64,
+	pub fee: U64,
+	pub last_block_timestamp: U64,
+	pub last_price_x_cumulative: String,
+	pub last_price_y_cumulative: String,
+	pub locked: bool,
+	pub x_scale: U64,
+	pub y_scale: U64,
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq)]
+pub struct AnimeswapLiquidityPool {
+	pub coin_x_reserve: AptosCoin,
+	pub coin_y_reserve: AptosCoin,
+	pub k_last: String,
+	pub last_block_timestamp: U64,
+	pub last_price_x_cumulative: String,
+	pub last_price_y_cumulative: String,
+	pub locked: bool,
+	pub lp_burn_cap: DummyField,
+	pub lp_mint_cap: DummyField,
+	pub lp_freeze_cap: DummyField,
+}
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub struct AuxAmmPool {
 	pub add_liquidity_events: EventHandle,

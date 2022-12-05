@@ -14,7 +14,7 @@ use aptos_sdk::move_types::language_storage::TypeTag;
 use std::time::SystemTime;
 use crate::{Calculator, EventSource, join_struct_tag_to_string, LiquidityProvider, LiquidityProviders, Pool};
 use crate::Meta;
-use crate::NODE_URL;
+use crate::{NODE_URL, KNOWN_STABLECOINS};
 use crate::events::{EventEmitter};
 use crate::types::{AuxAmmPool, CoinStoreResource, PancakeTokenPairMetadata};
 #[derive(Clone)]
@@ -153,6 +153,13 @@ impl LiquidityProvider for PancakeSwap {
 							if amm.balance_x.value.0 == 0 || amm.balance_y.value.0 == 0 {
 								continue;
 							}
+							if KNOWN_STABLECOINS.iter().any(|(x, decimals)| x.to_string() == coin_x && amm.balance_x.value.0 as f64 / 10.0_f64.powf(*decimals as f64) < 10.0) {
+								continue
+							}
+							if KNOWN_STABLECOINS.iter().any(|(y, decimals)| y.to_string() == coin_y &&  amm.balance_y.value.0 as f64 / 10.0_f64.powf(*decimals as f64) < 10.0) {
+								continue
+							}
+							
 							let mut pool = Pool {
 								address: metadata.contract_address.clone()
 									  + "::"
@@ -167,7 +174,7 @@ impl LiquidityProvider for PancakeSwap {
 								x_address: coin_x.clone(),
 								y_address: coin_y.clone(),
 								curve: None,
-								fee_bps: 150,
+								fee_bps: 25,
 								x_amount: amm.balance_x.value.0,
 								y_amount: amm.balance_y.value.0,
 								events_sources: vec![],

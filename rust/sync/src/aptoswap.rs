@@ -13,7 +13,7 @@ use std::str::FromStr;
 use aptos_sdk::move_types::language_storage::TypeTag;
 use crate::{Calculator, EventSource, join_struct_tag_to_string, LiquidityProvider, LiquidityProviders, Pool};
 use crate::Meta;
-use crate::NODE_URL;
+use crate::{NODE_URL, KNOWN_STABLECOINS};
 use crate::events::{EventEmitter};
 use crate::types::{AptoswapPool, AuxAmmPool, CoinStoreResource};
 #[derive(Debug, Eq, PartialEq, Clone)]
@@ -154,6 +154,13 @@ impl LiquidityProvider for Aptoswap {
 							if amm.x.value.0 == 0 || amm.y.value.0 == 0 {
 								continue;
 							}
+							if KNOWN_STABLECOINS.iter().any(|(x, decimals)| x.to_string() == coin_x && amm.x.value.0 as f64 / 10.0_f64.powf(*decimals as f64) < 10.0) {
+								continue
+							}
+							if KNOWN_STABLECOINS.iter().any(|(y, decimals)| y.to_string() == coin_y &&  amm.y.value.0 as f64 / 10.0_f64.powf(*decimals as f64) < 10.0) {
+								continue
+							}
+							
 							let mut pool = Pool {
 								address: metadata.contract_address.clone()
 									  + "::"

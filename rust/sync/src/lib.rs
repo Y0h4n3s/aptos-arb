@@ -5,6 +5,8 @@ mod pancakeswap;
 mod cetue;
 mod aptoswap;
 mod types;
+mod animeswap;
+mod liquidswap;
 
 use std::collections::HashMap;
 use std::fmt::Display;
@@ -26,7 +28,9 @@ use serde_json::Value;
 use tokio::task::JoinHandle;
 use url::Url;
 use crate::aux::AuxMetadata;
+use crate::animeswap::AnimeswapMetadata;
 use crate::obric::ObricMetadata;
+use crate::liquidswap::LiquidswapMetadata;
 use crate::cetue::CetueMetadata;
 use crate::aptoswap::AptoswapMetadata;
 use crate::pancakeswap::PancakeSwapMetadata;
@@ -171,6 +175,7 @@ impl LiquidityProviders  {
             LiquidityProviders::Cetue => Box::new(CpmmCalculator::new()),
             LiquidityProviders::PancakeSwap => Box::new(CpmmCalculator::new()),
             LiquidityProviders::Obric => Box::new(CpmmCalculator::new()),
+            LiquidityProviders::AnimeSwap => Box::new(CpmmCalculator::new()),
             _ => panic!("Invalid liquidity provider"),
         }
     }
@@ -215,6 +220,22 @@ impl LiquidityProviders  {
                     pool_name: String::from("Pool"),
                 };
                 Box::new(aptoswap::Aptoswap::new(metadata))
+            }
+            LiquidityProviders::AnimeSwap => {
+                let metadata = AnimeswapMetadata {
+                    contract_address: "0x796900ebe1a1a54ff9e932f19c548f5c1af5c6e7d34965857ac2f7b1d1ab2cbf".to_string(),
+                    pool_module: String::from("AnimeSwapPoolV1"),
+                    pool_name: String::from("LiquidityPool"),
+                };
+                Box::new(animeswap::Animeswap::new(metadata))
+            }
+            LiquidityProviders::LiquidSwap => {
+                let metadata = LiquidswapMetadata {
+                    contract_address: "0x05a97986a9d031c4567e15b797be516910cfcb4156312482efc6a19c0a30c948".to_string(),
+                    pool_module: String::from("liquidity_pool"),
+                    pool_name: String::from("LiquidityPool"),
+                };
+                Box::new(liquidswap::Liquidswap::new(metadata))
             }
             _ => panic!("Invalid liquidity provider"),
         }
@@ -300,6 +321,20 @@ static NODE_URL: Lazy<Url> = Lazy::new(|| {
             .unwrap_or("https://aptos-mainnet.pontem.network/"),
     )
     .unwrap()
+});
+
+static KNOWN_STABLECOINS: Lazy<Vec<(&str, usize)>> = Lazy::new(|| {
+    vec![
+        ("0x8d87a65ba30e09357fa2edea2c80dbac296e5dec2b18287113500b902942929d::celer_coin_manager::BusdCoin",8), // celer BUSD
+        ("0xf22bede237a07e121b56d91a491eb7bcdfd1f5907926a9e58338f964a01b17fa::asset::USDC", 6), // layer zero USDC
+        ("0x5e156f1207d0ebfa19a9eeff00d62a282278fb8719f4fab3a586a0a2c0fffbea::coin::T", 6), // wormhole USDC
+         ("0x8d87a65ba30e09357fa2edea2c80dbac296e5dec2b18287113500b902942929d::celer_coin_manager::UsdcCoin", 6), //celer USDC
+        ("0xf22bede237a07e121b56d91a491eb7bcdfd1f5907926a9e58338f964a01b17fa::asset::USDT",6), // layerzero USDT
+          ("0xa2eda21a58856fda86451436513b867c97eecb4ba099da5775520e0f7492e852::coin::T", 6), // wormhole USDT
+           ("0x8d87a65ba30e09357fa2edea2c80dbac296e5dec2b18287113500b902942929d::celer_coin_manager::UsdtCoin", 6), // celer USDT
+            ("0x8d87a65ba30e09357fa2edea2c80dbac296e5dec2b18287113500b902942929d::celer_coin_manager::DaiCoin", 8), // celer DAI
+        ("0x1000000fa32d122c18a6a31c009ce5e71674f22d06a581bb0a15575e6addadcc::usda::USDA", 6), // partners USDA
+    ]
 });
 
 // We can comment out ones with less liquidity to make routing faster

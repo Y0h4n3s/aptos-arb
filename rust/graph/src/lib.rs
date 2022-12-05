@@ -122,9 +122,7 @@ pub async fn start(
             })
             .is_none()
         {
-            if pool.address == "0xc7ea756470f72ae761b7986e4ed6fd409aad183b1b2d3d2f674d979852f45c4b::piece_swap::PieceSwapPoolInfo<0x1::aptos_coin::AptosCoin, 0x5e156f1207d0ebfa19a9eeff00d62a282278fb8719f4fab3a586a0a2c0fffbea::coin::T>" {
-                println!("adding edge {:?} {:?}", i1, i2);
-            }
+          
             the_graph.add_edge(i1, i2, pool.clone());
         }
     }

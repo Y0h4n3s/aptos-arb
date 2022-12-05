@@ -12,30 +12,30 @@ use async_trait::async_trait;
 use aptos_sdk::move_types::language_storage::StructTag;
 use std::str::FromStr;
 use aptos_sdk::move_types::language_storage::TypeTag;
-use crate::{Calculator, EventSource, join_struct_tag_to_string, LiquidityProvider, LiquidityProviders, Pool};
+use crate::{Calculator, EventSource, join_struct_tag_to_string, KNOWN_STABLECOINS, LiquidityProvider, LiquidityProviders, Pool};
 use crate::Meta;
-use crate::{NODE_URL, KNOWN_STABLECOINS};
+use crate::NODE_URL;
 use crate::events::{EventEmitter};
-use crate::types::{AuxAmmPool, CoinStoreResource};
+use crate::types::{AnimeswapLiquidityPool, AuxAmmPool, CoinStoreResource};
 #[derive(Clone)]
-pub struct AuxMetadata {
+pub struct AnimeswapMetadata {
 	pub contract_address: String,
 	pub pool_module: String,
 	pub pool_name: String,
 }
 
-impl Meta for AuxMetadata {
+impl Meta for AnimeswapMetadata {
 
 }
 
-pub struct Aux {
-	pub metadata: AuxMetadata,
+pub struct Animeswap {
+	pub metadata: AnimeswapMetadata,
 	pub pools: Arc<RwLock<HashMap<String, Pool>>>,
 	subscribers: Arc<RwLock<Vec<AsyncSender<Box<dyn EventSource<Event = Pool>>>>>>,
 }
 
-impl Aux {
-	pub fn new(metadata: AuxMetadata) -> Self {
+impl Animeswap {
+	pub fn new(metadata: AnimeswapMetadata) -> Self {
 		Self {
 			metadata,
 			pools: Arc::new(RwLock::new(HashMap::new())),
@@ -47,7 +47,7 @@ impl Aux {
 
 
 
-impl EventEmitter for Aux {
+impl EventEmitter for Animeswap {
 	type EventType = Box<dyn EventSource<Event = Pool>>;
 	fn get_subscribers(&self) -> Arc<RwLock<Vec<AsyncSender<Self::EventType>>>> {
 		self.subscribers.clone()
@@ -103,7 +103,7 @@ impl EventEmitter for Aux {
 }
 
 #[async_trait]
-impl LiquidityProvider for Aux {
+impl LiquidityProvider for Animeswap {
 	type Metadata = Box<dyn Meta>;
 	fn get_id(&self) -> LiquidityProviders {
 		LiquidityProviders::Aux
@@ -132,7 +132,7 @@ impl LiquidityProvider for Aux {
 						&resource.clone().resource_type.name.into_string().as_str(),
 					) {
 						(&module, &resource_name) => {
-
+							
 							if module != metadata.pool_module || resource_name != metadata.pool_name {
 								continue;
 							}
@@ -144,21 +144,20 @@ impl LiquidityProvider for Aux {
 								(TypeTag::Struct(struct_tag_x), TypeTag::Struct(struct_tag_y)) => (
 									struct_tag_x.to_string(),
 									struct_tag_y.to_string(),
-
+								
 								),
 								_ => continue,
 							};
-
-							let amm: AuxAmmPool = serde_json::from_value(resource.data.clone()).unwrap();
-
-							if amm.x_reserve.value.0 == 0 || amm.y_reserve.value.0 == 0 {
+							
+							let amm: AnimeswapLiquidityPool = serde_json::from_value(resource.data.clone()).unwrap();
+							if amm.coin_x_reserve.value.0 == 0 || amm.coin_y_reserve.value.0 == 0 {
 								continue;
 							}
-							if KNOWN_STABLECOINS.iter().any(|(x, decimals)| x.to_string() == coin_x && amm.x_reserve.value.0 as f64 / 10.0_f64.powf(*decimals as f64) < 10.0) {
-								continue
+							if KNOWN_STABLECOINS.iter().any(|(x, decimals)| x.to_string() == coin_x && amm.coin_x_reserve.value.0 as f64 / 10.0_f64.powf(*decimals as f64) < 10.0) {
+									continue
 							}
-							if KNOWN_STABLECOINS.iter().any(|(y, decimals)| y.to_string() == coin_y &&  amm.y_reserve.value.0 as f64 / 10.0_f64.powf(*decimals as f64) < 10.0) {
-								continue
+							if KNOWN_STABLECOINS.iter().any(|(y, decimals)| y.to_string() == coin_y &&  amm.coin_y_reserve.value.0 as f64 / 10.0_f64.powf(*decimals as f64) < 10.0) {
+									continue
 							}
 							
 							let mut pool = Pool {
@@ -173,14 +172,14 @@ impl LiquidityProvider for Aux {
 									  + coin_y.as_str()
 									  + ">",
 								x_address: coin_x.clone(),
-								fee_bps: amm.fee_bps.0,
+								fee_bps: 30,
 								y_address: coin_y.clone(),
 								curve: None,
-								x_amount: amm.x_reserve.value.0,
-								y_amount: amm.y_reserve.value.0,
+								x_amount: amm.coin_x_reserve.value.0,
+								y_amount: amm.coin_y_reserve.value.0,
 								events_sources: vec![],
 								x_to_y: true,
-								provider: LiquidityProviders::Aux
+								provider: LiquidityProviders::AnimeSwap
 							};
 							// Get the pool's event source from resources
 							
@@ -190,9 +189,9 @@ impl LiquidityProvider for Aux {
 					}
 				}
 			} else {
-				eprintln!("{:?}: {:?}", LiquidityProviders::Aux, wrapped_resources.unwrap_err());
+				eprintln!("{:?}: {:?}", LiquidityProviders::AnimeSwap, wrapped_resources.unwrap_err());
 			}
-			println!("{:?} Pools: {}",LiquidityProviders::Aux, pools.read().await.len());
+			println!("{:?} Pools: {}",LiquidityProviders::AnimeSwap, pools.read().await.len());
 		})
 	}
 }

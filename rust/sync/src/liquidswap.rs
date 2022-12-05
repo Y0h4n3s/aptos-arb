@@ -5,6 +5,7 @@ use tokio::runtime::Runtime;
 use async_std::sync::Arc;
 use std::time::Duration;
 use aptos_sdk::types::account_address::AccountAddress;
+use serde::{Serialize, Deserialize};
 use std::time::SystemTime;
 use std::collections::HashMap;
 use kanal::AsyncSender;
@@ -16,26 +17,26 @@ use crate::{Calculator, EventSource, join_struct_tag_to_string, LiquidityProvide
 use crate::Meta;
 use crate::{NODE_URL, KNOWN_STABLECOINS};
 use crate::events::{EventEmitter};
-use crate::types::{AuxAmmPool, CoinStoreResource};
+use crate::types::{AuxAmmPool, CoinStoreResource, LiquidswapLiquidityPool};
 #[derive(Clone)]
-pub struct AuxMetadata {
+pub struct LiquidswapMetadata {
 	pub contract_address: String,
 	pub pool_module: String,
 	pub pool_name: String,
 }
 
-impl Meta for AuxMetadata {
+impl Meta for LiquidswapMetadata {
 
 }
 
-pub struct Aux {
-	pub metadata: AuxMetadata,
+pub struct Liquidswap {
+	pub metadata: LiquidswapMetadata,
 	pub pools: Arc<RwLock<HashMap<String, Pool>>>,
 	subscribers: Arc<RwLock<Vec<AsyncSender<Box<dyn EventSource<Event = Pool>>>>>>,
 }
 
-impl Aux {
-	pub fn new(metadata: AuxMetadata) -> Self {
+impl Liquidswap {
+	pub fn new(metadata: LiquidswapMetadata) -> Self {
 		Self {
 			metadata,
 			pools: Arc::new(RwLock::new(HashMap::new())),
@@ -43,11 +44,18 @@ impl Aux {
 		}
 	}
 }
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ILiquidswapPool {
+    coin_x: String,
+    coin_y: String,
+    curve: String,
+    network_id: usize,
+}
 
 
 
-
-impl EventEmitter for Aux {
+impl EventEmitter for Liquidswap {
 	type EventType = Box<dyn EventSource<Event = Pool>>;
 	fn get_subscribers(&self) -> Arc<RwLock<Vec<AsyncSender<Self::EventType>>>> {
 		self.subscribers.clone()
@@ -103,7 +111,7 @@ impl EventEmitter for Aux {
 }
 
 #[async_trait]
-impl LiquidityProvider for Aux {
+impl LiquidityProvider for Liquidswap {
 	type Metadata = Box<dyn Meta>;
 	fn get_id(&self) -> LiquidityProviders {
 		LiquidityProviders::Aux
@@ -125,6 +133,9 @@ impl LiquidityProvider for Aux {
 			let wrapped_resources = aptos_client
 				  .get_account_resources(AccountAddress::from_str(&resources_address).unwrap())
 				  .await;
+			let known_pools: Vec<ILiquidswapPool> = serde_json::from_str(
+        &std::fs::read_to_string(std::path::Path::new("./liquidswap_pools.json")).unwrap(),
+    ).unwrap();
 			if let Ok(resources) = wrapped_resources {
 				for resource in resources.inner().into_iter() {
 					match (
@@ -132,32 +143,41 @@ impl LiquidityProvider for Aux {
 						&resource.clone().resource_type.name.into_string().as_str(),
 					) {
 						(&module, &resource_name) => {
-
+							
 							if module != metadata.pool_module || resource_name != metadata.pool_name {
 								continue;
 							}
 							
-							let (coin_x, coin_y) = match (
+							let (coin_x, coin_y, curve) = match (
 								resource.resource_type.type_params.get(0).unwrap(),
 								resource.resource_type.type_params.get(1).unwrap(),
+								resource.resource_type.type_params.get(2).unwrap(),
 							) {
-								(TypeTag::Struct(struct_tag_x), TypeTag::Struct(struct_tag_y)) => (
+								(TypeTag::Struct(struct_tag_x), TypeTag::Struct(struct_tag_y), TypeTag::Struct(curve)) => (
 									struct_tag_x.to_string(),
 									struct_tag_y.to_string(),
-
+									curve.to_string(),
+								
 								),
 								_ => continue,
 							};
-
-							let amm: AuxAmmPool = serde_json::from_value(resource.data.clone()).unwrap();
-
-							if amm.x_reserve.value.0 == 0 || amm.y_reserve.value.0 == 0 {
+							
+							let amm: LiquidswapLiquidityPool = serde_json::from_value(resource.data.clone()).unwrap();
+							
+							if amm.coin_x_reserve.value.0 == 0 || amm.coin_y_reserve.value.0 == 0 {
 								continue;
 							}
-							if KNOWN_STABLECOINS.iter().any(|(x, decimals)| x.to_string() == coin_x && amm.x_reserve.value.0 as f64 / 10.0_f64.powf(*decimals as f64) < 10.0) {
+							
+							if !known_pools
+                        .iter()
+                        .any(|pool| pool.coin_x == coin_x && pool.coin_y == coin_y)
+                    {
+                        continue;
+                    }
+							if KNOWN_STABLECOINS.iter().any(|(x, decimals)| x.to_string() == coin_x && amm.coin_x_reserve.value.0 as f64 / 10.0_f64.powf(*decimals as f64) < 10.0) {
 								continue
 							}
-							if KNOWN_STABLECOINS.iter().any(|(y, decimals)| y.to_string() == coin_y &&  amm.y_reserve.value.0 as f64 / 10.0_f64.powf(*decimals as f64) < 10.0) {
+							if KNOWN_STABLECOINS.iter().any(|(y, decimals)| y.to_string() == coin_y &&  amm.coin_y_reserve.value.0 as f64 / 10.0_f64.powf(*decimals as f64) < 10.0) {
 								continue
 							}
 							
@@ -173,14 +193,14 @@ impl LiquidityProvider for Aux {
 									  + coin_y.as_str()
 									  + ">",
 								x_address: coin_x.clone(),
-								fee_bps: amm.fee_bps.0,
+								fee_bps: amm.fee.0,
 								y_address: coin_y.clone(),
-								curve: None,
-								x_amount: amm.x_reserve.value.0,
-								y_amount: amm.y_reserve.value.0,
+								curve: Some(curve),
+								x_amount: amm.coin_x_reserve.value.0,
+								y_amount: amm.coin_y_reserve.value.0,
 								events_sources: vec![],
 								x_to_y: true,
-								provider: LiquidityProviders::Aux
+								provider: LiquidityProviders::LiquidSwap
 							};
 							// Get the pool's event source from resources
 							
@@ -190,9 +210,9 @@ impl LiquidityProvider for Aux {
 					}
 				}
 			} else {
-				eprintln!("{:?}: {:?}", LiquidityProviders::Aux, wrapped_resources.unwrap_err());
+				eprintln!("{:?}: {:?}", LiquidityProviders::LiquidSwap, wrapped_resources.unwrap_err());
 			}
-			println!("{:?} Pools: {}",LiquidityProviders::Aux, pools.read().await.len());
+			println!("{:?} Pools: {}",LiquidityProviders::LiquidSwap    , pools.read().await.len());
 		})
 	}
 }
