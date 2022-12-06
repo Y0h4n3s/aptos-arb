@@ -264,8 +264,24 @@ pub async fn start(
                                 edge_paths = new_edge_paths;
                             }
 
-                            for edge_path in edge_paths {
-                                safe_paths.insert((in_address.clone(), edge_path));
+                            // add the reverse of each path just to be thorough
+                            for mut edge_path in edge_paths {
+                                safe_paths.insert((in_address.clone(), edge_path.clone()));
+                                edge_path.reverse();
+                                let mut new_path = vec![];
+                                let mut in_a = in_address.clone();
+                                for pool in edge_path {
+                                    let mut new_pool = pool.clone();
+                                    new_pool.x_to_y = new_pool.x_address == in_a;
+                                    in_a = if new_pool.x_to_y {
+                                        new_pool.y_address.clone()
+                                    } else {
+                                        new_pool.x_address.clone()
+                                    };
+                                    new_path.push(new_pool);
+                                    
+                                }
+                                safe_paths.insert((in_address.clone(), new_path));
                             }
                         }
                     }
