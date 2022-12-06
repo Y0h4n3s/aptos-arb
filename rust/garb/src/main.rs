@@ -420,7 +420,6 @@ pub async fn transactor(routes: &mut kanal::AsyncReceiver<Order>) {
                     let price_of_coin = coin_price.read().await;
                     // order size is in atomic units + gas value converted to coin
                     let size_with_fees = order.size * 10_u64.pow(decimals as u32) + (((max_gas_units * *gas_unit) as f64 /  10.0_f64.powf(8.0)) * *price_of_coin * 10.0_f64.powf(decimals as f64)) as u64;
-                    println!("size with fees {}", size_with_fees);
                     args.push(
                         size_with_fees
                               .to_le_bytes()
