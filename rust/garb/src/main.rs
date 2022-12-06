@@ -18,10 +18,16 @@ use std::collections::{HashMap};
 use std::str::FromStr;
 use std::time::Duration;
 use aptos_sdk::types::vm_status::StatusCode;
+use coingecko::CoinGeckoClient;
 use tokio::runtime::Runtime;
 use tokio::sync::RwLock;
 use url::Url;
-use garb_graph_aptos::Order;
+use garb_graph_aptos::{Order, CHECKED_COIN};
+
+//arb accounts on aptos
+//0xaf1236aea0c9cf7b87361c8df5f202c19cbcbb344c9bcc810e008d0f490f56ce
+//0xfd2594ac71d95d1e86df9921d03ad2a409b871ee7f866560c21ff17945fd2fca
+
 
 static NODE_URLS: Lazy<Vec<Url>> = Lazy::new(|| {
     vec![ Url::from_str(
@@ -135,11 +141,13 @@ pub async fn async_main() -> anyhow::Result<()> {
 pub async fn transactor(routes: &mut kanal::AsyncReceiver<Order>) {
     let seq_number = Arc::new(tokio::sync::RwLock::new(22_u64));
     let gas_unit_price = Arc::new(tokio::sync::RwLock::new(100_u64));
+    let price_vs_apt = Arc::new(tokio::sync::RwLock::new(1.0_f64));
     
     
     let mut join_handles = vec![];
     let seq_num = seq_number.clone();
     let gas_price = gas_unit_price.clone();
+    let p_vs_apt = price_vs_apt.clone();
     join_handles.push(tokio::spawn(async move {
         // keep updating seq_number
     
@@ -149,6 +157,39 @@ pub async fn transactor(routes: &mut kanal::AsyncReceiver<Order>) {
                 let seq = account.inner().sequence_number;
                 let mut w = seq_num.write().await;
                 *w = seq ;
+                std::mem::drop(w);
+            }
+            tokio::time::sleep(Duration::from_secs(5)).await;
+        }
+    }));
+    
+    join_handles.push(tokio::spawn(async move {
+        // keep updating price for gas
+        let client = CoinGeckoClient::new("https://api.coingecko.com/api/v3");
+        let aptos_client = Client::new_with_timeout(NODE_URLS.first().unwrap().clone(), Duration::from_secs(45));
+        let arbed_coin = CHECKED_COIN.clone();
+        if arbed_coin == "0x1::aptos_coin::AptosCoin" {
+            return;
+        }
+        let coin_list = client.coins_list(true).await.unwrap();
+        let coin_info = aptos_client.get_account_resource(AccountAddress::from_str(arbed_coin.split("::").collect::<Vec<&str>>()[0]).unwrap(), &("0x1::coin::CoinInfo<".to_string() + &arbed_coin + ">")).await;
+        let mut coin_symbol = "apt".to_string();
+        if let Ok(coin_info) = coin_info {
+            if coin_info.inner().is_none() {
+                panic!("Unsupported coin {}", arbed_coin)
+            }
+            let res = coin_info.into_inner().unwrap();
+            coin_symbol  = res.data.as_object().unwrap().get("symbol").unwrap().as_str().unwrap().to_lowercase();
+        }
+        let coin_id = coin_list.iter().find(|c| c.symbol == coin_symbol).unwrap_or_else(|| panic!("Unsupported coin {}", arbed_coin)).id.clone();
+        loop {
+            let resp = client.price(&[&coin_id, &"aptos".to_string()], &["usd"], false, false,false,false).await;
+            if let Ok(price) = resp  {
+                let coin_price = price.get(&coin_id).unwrap_or_else(|| panic!("{} price not found", coin_id));
+                let apt_price = price.get("aptos").unwrap_or_else(|| panic!("apt price not found"));
+                let coin_vs_apt = apt_price.usd.unwrap() / coin_price.usd.unwrap();
+                let mut w = p_vs_apt.write().await;
+                *w = coin_vs_apt;
                 std::mem::drop(w);
             }
             tokio::time::sleep(Duration::from_secs(5)).await;
@@ -176,12 +217,13 @@ pub async fn transactor(routes: &mut kanal::AsyncReceiver<Order>) {
     let t = total_tasks.clone();
     let a = active_tasks.clone();
     let p = par_requests.clone();
+    let pr = price_vs_apt.clone();
     join_handles.push(tokio::spawn(async move {
         // print info
         loop {
             tokio::time::sleep(Duration::from_secs(30)).await;
             let tasks = t.read().await;
-            println!("total_tasks: {}, waiting_tasks: {}, working_tasks: {}/{}", tasks, a.read().await,*PARALLEL_REQUESTS - p.available_permits(), *PARALLEL_REQUESTS);
+            println!("total_tasks: {}, waiting_tasks: {}, working_tasks: {}/{} price_vs_apt: {}", tasks, a.read().await,*PARALLEL_REQUESTS - p.available_permits(), *PARALLEL_REQUESTS, pr.read().await);
         }
     }));
     
@@ -201,6 +243,7 @@ pub async fn transactor(routes: &mut kanal::AsyncReceiver<Order>) {
             let gas_unit_price = gas_unit_price.clone();
             let requests = par_requests.clone();
             let active_tasks = active_tasks.clone();
+            let coin_price = price_vs_apt.clone();
             join_handles.push(tokio::spawn(async move {
             
                 // build the transaction
@@ -374,8 +417,12 @@ pub async fn transactor(routes: &mut kanal::AsyncReceiver<Order>) {
                 
                     let gas_unit = gas_unit_price.read().await;
                     let mut args = args.clone();
+                    let price_of_coin = coin_price.read().await;
+                    // order size is in atomic units + gas value converted to coin
+                    let size_with_fees = order.size * 10_u64.pow(decimals as u32) + (((max_gas_units * *gas_unit) as f64 /  10.0_f64.powf(8.0)) * *price_of_coin * 10.0_f64.powf(decimals as f64)) as u64;
+                    println!("size with fees {}", size_with_fees);
                     args.push(
-                        (order.size * 10_u64.pow(decimals as u32) + (max_gas_units * *gas_unit))
+                        size_with_fees
                               .to_le_bytes()
                               .to_vec(),
                     );
@@ -434,6 +481,7 @@ pub async fn transactor(routes: &mut kanal::AsyncReceiver<Order>) {
                                         
                                         if let Some(info) = info {
                                             if info.reason_name == "ECOIN_STORE_NOT_PUBLISHED" {
+                                                println!("initialize coin");
                                                 for (i, pool) in order.route.iter().enumerate() {
                                                     println!("{}. {}", i + 1, pool);
                                                 }

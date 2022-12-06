@@ -34,11 +34,14 @@ pub struct Order {
     pub route: Vec<Pool>
 }
 
-static CHECKED_COIN: Lazy<String> =  Lazy::new(|| {
+pub static CHECKED_COIN: Lazy<String> =  Lazy::new(|| {
     std::env::var("APTOS_CHECKED_COIN").unwrap_or("0x1::aptos_coin::AptosCoin".to_string())
-
-    
 });
+
+pub static MAX_SIZE: Lazy<u64> = Lazy::new(|| {
+    std::env::var("APTOS_MAX_SIZE").unwrap_or("120".to_string()).parse().unwrap()
+});
+
 
 pub async fn start(
     pools: Arc<RwLock<HashMap<String, Pool>>>,
@@ -367,7 +370,7 @@ pub async fn start(
                     
                             let mut best_route_index = 0;
                             let mut best_route = 0.0;
-                            for i in 1..120 {
+                            for i in 1..MAX_SIZE.clone()+1 {
                                 let i_atomic = (i as u64) * 10_u64.pow(decimals as u32);
                                 let mut in_ = i_atomic;
                                 for route in paths {
