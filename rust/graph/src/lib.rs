@@ -28,6 +28,7 @@ where
     result
 }
 
+#[derive(Clone)]
 pub struct Order {
     pub size: u64,
     pub decimals: u64,

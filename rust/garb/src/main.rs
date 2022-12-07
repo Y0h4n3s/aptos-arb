@@ -112,19 +112,20 @@ pub async fn async_main() -> anyhow::Result<()> {
     
     let mut joins = vec![];
     
+    let graph_routes = routes_sender.clone();
     joins.push(std::thread::spawn(move || {
         let rt = Runtime::new().unwrap();
        
         rt.block_on(async move {
             
-            garb_graph_aptos::start(pools.clone(), update_q_receiver, Arc::new(RwLock::new(routes_sender))).await;
+            garb_graph_aptos::start(pools.clone(), update_q_receiver, Arc::new(RwLock::new(graph_routes))).await;
     
         });
     }));
     joins.push(std::thread::spawn(move || {
         let rt = Runtime::new().unwrap();
         rt.block_on(async move {
-            transactor(&mut routes_receiver).await;
+            transactor(&mut routes_receiver, routes_sender).await;
     
         });
     }));
@@ -138,7 +139,7 @@ pub async fn async_main() -> anyhow::Result<()> {
 // routes: the updated paths compiled by the graph task
 //         it is updated every time there is an event on a pool on chain
 //         we will spam the network with transaction simulations and pick the best one
-pub async fn transactor(routes: &mut kanal::AsyncReceiver<Order>) {
+pub async fn transactor(routes: &mut kanal::AsyncReceiver<Order>, routes_sender: kanal::AsyncSender<Order>) {
     let seq_number = Arc::new(tokio::sync::RwLock::new(22_u64));
     let gas_unit_price = Arc::new(tokio::sync::RwLock::new(100_u64));
     let price_vs_apt = Arc::new(tokio::sync::RwLock::new(1.0_f64));
@@ -226,7 +227,7 @@ pub async fn transactor(routes: &mut kanal::AsyncReceiver<Order>) {
             println!("total_tasks: {}, waiting_tasks: {}, working_tasks: {}/{} price_vs_apt: {}", tasks, a.read().await,*PARALLEL_REQUESTS - p.available_permits(), *PARALLEL_REQUESTS, pr.read().await);
         }
     }));
-    
+    let route_recurse_arc = Arc::new(routes_sender);
     while let Ok(order) = routes.try_recv() {
         
         if let Some(order) = order {
@@ -245,6 +246,7 @@ pub async fn transactor(routes: &mut kanal::AsyncReceiver<Order>) {
             let active_tasks = active_tasks.clone();
             let coin_price = price_vs_apt.clone();
             let gas_map = gas_units_for_tx.clone();
+            let route_sender = route_recurse_arc.clone();
             join_handles.push(tokio::spawn(async move {
             
                 // build the transaction
@@ -473,17 +475,7 @@ pub async fn transactor(routes: &mut kanal::AsyncReceiver<Order>) {
                                         }
                                     
                                         // send the transaction
-                                        let mut seq_number = signed_tx.sequence_number();
-                                        let payload = signed_tx.payload();
-                                        let gas = signed_tx.max_gas_amount();
                                         
-                                        'tx_loop: loop {
-                                            let raw_tx = tx_f.payload(payload.clone())
-                                                .sender(KEY.address())
-                                                .sequence_number(seq_number)
-                                                .max_gas_amount(gas)
-                                                .build();
-                                            let signed_tx = KEY.sign_transaction(raw_tx);
                                             let result = aptos_client.submit_bcs(&signed_tx).await;
                                             if let Ok(_result) = result {
                                                 println!("`````````````````````` Tried Route ``````````````````````");
@@ -494,26 +486,22 @@ pub async fn transactor(routes: &mut kanal::AsyncReceiver<Order>) {
                                                 let mut seq_num = sequence_number.write().await;
                                                 *seq_num += 1;
                                                 println!("seq_num: {:?}", seq_num);
-                                                break 'tx_loop;
                                             } else {
                                                 match result.unwrap_err() {
                                                     RestError::Api(err) => {
-                                                        if err.error.error_code as u32 == AptosErrorCode::InvalidTransactionUpdate as u32 {
-                                                            seq_number += 1;
-                                                        } else if err.error.error_code as u32 == AptosErrorCode::SequenceNumberTooOld as u32 {
-                                                            seq_number += 1;
-                                                        } else {
+                                                        if err.error.error_code as u32 == AptosErrorCode::InvalidTransactionUpdate as u32 || err.error.error_code as u32 == AptosErrorCode::SequenceNumberTooOld as u32{
+                                                           route_sender.try_send(order.clone()).unwrap();
+                                                        }else {
                                                             println!("Error: {:?}", err);
-                                                            break 'tx_loop;
                                                         }
+    
                                                     }
                                                     err => {
                                                         println!("Error: {:?}", err);
-                                                        break 'tx_loop;
                                                     }
                                                 }
                                             }
-                                        }
+                                        
                                         
                                     }
                                     ExecutionStatus::OutOfGas => {}
