@@ -362,64 +362,73 @@ pub async fn start(
                 let path_lookup = path_lookup.clone();
                 let routes = routes.clone();
                 tokio::task::spawn_local(async move {
-                    if let Some((pool, market_routes)) = path_lookup.read().await.iter().find(|(key, _value)|updated_market.address == key.address && updated_market.x_address == key.x_address && updated_market.y_address == key.y_address && updated_market.provider == key.provider) {
-                        if market_routes.len() <= 0 {
+                    let read = path_lookup.read().await;
+                    let updated = read.iter().find(|(key, _value)|updated_market.address == key.address && updated_market.x_address == key.x_address && updated_market.y_address == key.y_address && updated_market.provider == key.provider);
+                    if updated.is_some() {
+                        let (pool, market_routes) =  updated.unwrap();
+                        let pool = pool.clone();
+                        let market_routes = market_routes.clone();
+                        std::mem::drop(read);
+                        if market_routes.len() <= 0  {
                             return;
                         }
-                        // println!(
-                        //     "graph service> {} routes that go through {}",
-                        //     market_routes.len(),
-                        //     updated_market
-                        // );
-                        for (_pool_addr, paths) in market_routes.iter() {
-                            if !paths.contains(pool) {
+    
+    
+                        let mut new_market_routes = HashSet::new();
+                        for (_pool_addr, mut paths) in market_routes.into_iter() {
+                            if !paths.contains(&pool) {
+                                new_market_routes.insert((_pool_addr, paths));
                                 continue
                             }
+                            let pool_index = paths.iter().position(|p| p == &pool).unwrap();
+                            paths[pool_index] = updated_market.clone();
+                            new_market_routes.insert((_pool_addr, paths.clone()));
+                            
                             let in_addr = if paths.first().unwrap().x_to_y {
                                 paths.first().unwrap().x_address.clone()
                             } else {
                                 paths.first().unwrap().y_address.clone()
                             };
                             let decimals = decimals(in_addr);
-                    
+        
                             let mut best_route_index = 0;
                             let mut best_route = 0.0;
                             for i in 1..MAX_SIZE.clone()+1 {
                                 let i_atomic = (i as u64) * 10_u64.pow(decimals as u32);
                                 let mut in_ = i_atomic;
-                                for route in paths {
+                                for route in &paths {
                                     let calculator = route.provider.build_calculator();
-                                   
+                
                                     in_ = calculator.calculate_out(in_, route);
                                 }
                                 if in_ < i_atomic {
                                     continue;
                                 }
-                        
+            
                                 let percent = in_ as f64 - i_atomic as f64;
-
-
+            
+            
                                 if percent > best_route {
                                     best_route = percent;
                                     best_route_index = i;
                                 }
                             }
-                            
+        
                             if best_route > 0.0 {
-
+            
                                 let order = Order {
                                     size: best_route_index as u64,
                                     decimals,
                                     route: paths.clone(),
                                 };
-
+            
                                 let r = routes.write().await;
                                 r.try_send(order).unwrap();
                             }
-                    
-                    
                         }
-                
+                        let mut w = path_lookup.write().await;
+    
+                        w.insert(pool.clone(), new_market_routes);
                     } else {
                         eprintln!("graph service> No routes found for {}", updated_market);
                     }
