@@ -142,7 +142,7 @@ pub async fn transactor(routes: &mut kanal::AsyncReceiver<Order>) {
     let seq_number = Arc::new(tokio::sync::RwLock::new(22_u64));
     let gas_unit_price = Arc::new(tokio::sync::RwLock::new(100_u64));
     let price_vs_apt = Arc::new(tokio::sync::RwLock::new(1.0_f64));
-    let gas_units_for_tx = Arc::new(tokio::sync::RwLock::new(HashMap::<Vec<Pool>, u64>::new()));
+    let gas_units_for_tx = Arc::new(tokio::sync::RwLock::new(HashMap::<Vec<String>, u64>::new()));
     
     let mut join_handles = vec![];
     let seq_num = seq_number.clone();
@@ -403,8 +403,9 @@ pub async fn transactor(routes: &mut kanal::AsyncReceiver<Order>) {
                 );
                 let gases = gas_map.read().await;
                 let mut gas_saved = true;
-                let max_gas_units = if gases.get(&order.route).is_some() {
-                    *gases.get(&order.route).unwrap() + 2000
+                let saved_gas = gases.get(&order.route.iter().map(|p| p.address.clone() + &p.x_address + &p.y_address + &format!("{:?}", p.provider)).collect::<Vec<String>>());
+                let max_gas_units = if saved_gas.is_some() {
+                    saved_gas.unwrap() + 2000
                 } else {
                     gas_saved = false;
                     MAX_GAS_UNITS.clone()
@@ -534,7 +535,8 @@ pub async fn transactor(routes: &mut kanal::AsyncReceiver<Order>) {
                                             if info.reason_name == "E_OUTPUT_LESS_THAN_MINIMUM" || info.reason_name == "ERROR_INSUFFICIENT_OUTPUT_AMOUNT" || info.reason_name == "ERR_INSUFFICIENT_OUTPUT_AMOUNT" {
                                                 if !gas_saved {
                                                     let mut gases = gas_map.write().await;
-                                                    gases.insert(order.route.clone(), tx_info.gas_used());
+                                                    let id = order.route.iter().map(|p| p.address.clone() + &p.x_address + &p.y_address + &format!("{:?}", p.provider)).collect::<Vec<String>>();
+                                                    gases.insert(id, tx_info.gas_used());
                                                     std::mem::drop(gases);
                                                 }
                                                 continue 'sim_loop;
