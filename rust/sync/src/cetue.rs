@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use kanal::AsyncSender;
 use std::str::FromStr;
 use aptos_sdk::move_types::language_storage::TypeTag;
-use crate::{EventSource, LiquidityProvider, LiquidityProviders, Pool};
+use crate::{Curve, EventSource, LiquidityProvider, LiquidityProviders, Pool};
 use crate::Meta;
 use crate::{NODE_URL, KNOWN_STABLECOINS};
 use crate::events::{EventEmitter};
@@ -173,6 +173,7 @@ impl LiquidityProvider for Cetue {
 								x_address: coin_x.clone(),
 								y_address: coin_y.clone(),
 								fee_bps: 200,
+								curve_type: Curve::Uncorrelated,
 								curve: None,
 								x_amount: amm.coin_a.value.0,
 								y_amount: amm.coin_b.value.0,

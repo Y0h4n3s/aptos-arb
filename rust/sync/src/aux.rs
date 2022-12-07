@@ -10,7 +10,7 @@ use kanal::AsyncSender;
 use async_trait::async_trait;
 use std::str::FromStr;
 use aptos_sdk::move_types::language_storage::TypeTag;
-use crate::{ EventSource, LiquidityProvider, LiquidityProviders, Pool};
+use crate::{Curve, EventSource, LiquidityProvider, LiquidityProviders, Pool};
 use crate::Meta;
 use crate::{NODE_URL, KNOWN_STABLECOINS};
 use crate::events::{EventEmitter};
@@ -174,6 +174,7 @@ impl LiquidityProvider for Aux {
 								fee_bps: amm.fee_bps.0,
 								y_address: coin_y.clone(),
 								curve: None,
+								curve_type: Curve::Uncorrelated,
 								x_amount: amm.x_reserve.value.0,
 								y_amount: amm.y_reserve.value.0,
 								x_to_y: true,

@@ -239,11 +239,18 @@ impl LiquidityProviders {
 }
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
+pub enum Curve {
+    Uncorrelated,
+    Stable
+}
+
+#[derive(Debug, Clone, Hash, Eq, PartialEq)]
 pub struct Pool {
     pub address: String,
     pub x_address: String,
     pub y_address: String,
     pub curve: Option<String>,
+    pub curve_type: Curve,
     pub fee_bps: u64,
     pub x_amount: u64,
     pub y_amount: u64,
@@ -266,6 +273,7 @@ impl From<&Pool> for Pool {
             x_address: pool.x_address.clone(),
             y_address: pool.y_address.clone(),
             curve: pool.curve.clone(),
+            curve_type: pool.curve_type.clone(),
             x_amount: pool.x_amount,
             y_amount: pool.y_amount,
             x_to_y: pool.x_to_y,

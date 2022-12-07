@@ -11,7 +11,7 @@ use kanal::AsyncSender;
 use async_trait::async_trait;
 use std::str::FromStr;
 use aptos_sdk::move_types::language_storage::TypeTag;
-use crate::{EventSource, LiquidityProvider, LiquidityProviders, Pool};
+use crate::{Curve, EventSource, LiquidityProvider, LiquidityProviders, Pool};
 use crate::Meta;
 use crate::{NODE_URL, KNOWN_STABLECOINS};
 use crate::events::{EventEmitter};
@@ -159,6 +159,13 @@ impl LiquidityProvider for Liquidswap {
 								),
 								_ => continue,
 							};
+							let curve_type = if curve.ends_with("Uncorrelated") {
+								Curve::Uncorrelated
+							} else if curve.ends_with("Stable") {
+								Curve::Stable
+							} else {
+								Curve::Uncorrelated
+							};
 							
 							let amm: LiquidswapLiquidityPool = serde_json::from_value(resource.data.clone()).unwrap();
 							
@@ -193,7 +200,8 @@ impl LiquidityProvider for Liquidswap {
 								x_address: coin_x.clone(),
 								fee_bps: amm.fee.0,
 								y_address: coin_y.clone(),
-								curve: Some(curve),
+								curve_type,
+								curve: Some(curve.clone()),
 								x_amount: amm.coin_x_reserve.value.0,
 								y_amount: amm.coin_y_reserve.value.0,
 								x_to_y: true,

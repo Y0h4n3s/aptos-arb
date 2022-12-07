@@ -13,6 +13,7 @@ use aptos_sdk::move_types::language_storage::TypeTag;
 use crate::{ EventSource, LiquidityProvider, LiquidityProviders, Pool};
 use crate::Meta;
 use crate::{NODE_URL, KNOWN_STABLECOINS};
+use crate::Curve::Uncorrelated;
 use crate::events::{EventEmitter};
 use crate::types::{ ObricPieceSwapPoolInfo};
 #[derive(Clone)]
@@ -173,6 +174,7 @@ impl LiquidityProvider for Obric {
 									  + ">",
 								x_address: coin_x.clone(),
 								y_address: coin_y.clone(),
+								curve_type: Uncorrelated,
 								curve: None,
 								fee_bps: amm.swap_fee_per_million.0,
 								x_amount: amm.reserve_x.value.0,

@@ -11,6 +11,7 @@ use async_trait::async_trait;
 use std::str::FromStr;
 use aptos_sdk::move_types::language_storage::TypeTag;
 use crate::{EventSource, KNOWN_STABLECOINS, LiquidityProvider, LiquidityProviders, Pool};
+use crate::Curve::Uncorrelated;
 use crate::Meta;
 use crate::NODE_URL;
 use crate::events::{EventEmitter};
@@ -172,6 +173,7 @@ impl LiquidityProvider for Animeswap {
 								x_address: coin_x.clone(),
 								fee_bps: 30,
 								y_address: coin_y.clone(),
+								curve_type: Uncorrelated,
 								curve: None,
 								x_amount: amm.coin_x_reserve.value.0,
 								y_amount: amm.coin_y_reserve.value.0,

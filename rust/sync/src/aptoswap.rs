@@ -13,6 +13,7 @@ use aptos_sdk::move_types::language_storage::TypeTag;
 use crate::{EventSource, LiquidityProvider, LiquidityProviders, Pool};
 use crate::Meta;
 use crate::{NODE_URL, KNOWN_STABLECOINS};
+use crate::Curve::Uncorrelated;
 use crate::events::{EventEmitter};
 use crate::types::{AptoswapPool};
 #[derive(Debug, Eq, PartialEq, Clone)]
@@ -174,6 +175,7 @@ impl LiquidityProvider for Aptoswap {
 								x_address: coin_x.clone(),
 								y_address: coin_y.clone(),
 								fee_bps: amm.lp_fee.0,
+								curve_type: Uncorrelated,
 								curve: None,
 								x_amount: amm.x.value.0,
 								y_amount: amm.y.value.0,
