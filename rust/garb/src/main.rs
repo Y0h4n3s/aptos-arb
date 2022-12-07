@@ -411,6 +411,9 @@ pub async fn transactor(routes: &mut kanal::AsyncReceiver<Order>) {
                 };
                 std::mem::drop(gases);
                 if max_gas_units > MAX_GAS_UNITS.clone() {
+                    let mut w = active_tasks.write().await;
+                    *w -= 1;
+                    std::mem::drop(w);
                     return;
                 }
                 let decimals = order.decimals;
