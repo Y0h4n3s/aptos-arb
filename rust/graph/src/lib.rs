@@ -373,14 +373,14 @@ pub async fn start(
                             return;
                         }
     
-    
+                        
                         let mut new_market_routes = HashSet::new();
                         for (_pool_addr, mut paths) in market_routes.into_iter() {
-                            if !paths.contains(&pool) {
+                            if !(paths.iter().find(|p| p.address == updated_market.address && p.x_address == updated_market.x_address && p.y_address == updated_market.y_address && p.provider == updated_market.provider ).is_some()) {
                                 new_market_routes.insert((_pool_addr, paths));
                                 continue
                             }
-                            let pool_index = paths.iter().position(|p| p == &pool).unwrap();
+                            let pool_index = paths.iter().position(|p| p.address == updated_market.address && p.x_address == updated_market.x_address && p.y_address == updated_market.y_address && p.provider == updated_market.provider ).unwrap();
                             paths[pool_index] = updated_market.clone();
                             new_market_routes.insert((_pool_addr, paths.clone()));
                             
