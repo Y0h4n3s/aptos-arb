@@ -142,7 +142,7 @@ pub async fn transactor(routes: &mut kanal::AsyncReceiver<Order>) {
     let seq_number = Arc::new(tokio::sync::RwLock::new(22_u64));
     let gas_unit_price = Arc::new(tokio::sync::RwLock::new(100_u64));
     let price_vs_apt = Arc::new(tokio::sync::RwLock::new(1.0_f64));
-    
+    let gas_units_for_tx = Arc::new(tokio::sync::RwLock::new(HashMap::<Vec<Pool>, u64>::new()));
     
     let mut join_handles = vec![];
     let seq_num = seq_number.clone();
@@ -244,6 +244,7 @@ pub async fn transactor(routes: &mut kanal::AsyncReceiver<Order>) {
             let requests = par_requests.clone();
             let active_tasks = active_tasks.clone();
             let coin_price = price_vs_apt.clone();
+            let gas_map = gas_units_for_tx.clone();
             join_handles.push(tokio::spawn(async move {
             
                 // build the transaction
@@ -400,9 +401,18 @@ pub async fn transactor(routes: &mut kanal::AsyncReceiver<Order>) {
                     &mut args[0],
                     function.to_le_bytes().to_vec(),
                 );
-                // TODO: get price of tokens for non APT arbs
-                let max_gas_units = MAX_GAS_UNITS.clone();
-            
+                let gases = gas_map.read().await;
+                let mut gas_saved = true;
+                let max_gas_units = if gases.get(&order.route).is_some() {
+                    *gases.get(&order.route).unwrap() + 2000
+                } else {
+                    gas_saved = false;
+                    MAX_GAS_UNITS.clone()
+                };
+                std::mem::drop(gases);
+                if max_gas_units > MAX_GAS_UNITS.clone() {
+                    return;
+                }
                 let decimals = order.decimals;
                 args.push((order.size * 10_u64.pow(decimals as u32)).to_le_bytes().to_vec());
             
@@ -449,10 +459,11 @@ pub async fn transactor(routes: &mut kanal::AsyncReceiver<Order>) {
                         std::mem::drop(permit);
                     
                         match result.into_inner().info {
-                            TransactionInfo::V0(info) => {
-                                match info.status() {
+                            TransactionInfo::V0(tx_info) => {
+                             
+                                match tx_info.status() {
                                     ExecutionStatus::Success => {
-                                        if info.gas_used() > max_gas_units {
+                                        if tx_info.gas_used() > max_gas_units {
                                             continue 'sim_loop;
                                         }
                                     
@@ -488,6 +499,11 @@ pub async fn transactor(routes: &mut kanal::AsyncReceiver<Order>) {
                                                 continue 'sim_loop;
                                             }
                                             if info.reason_name == "E_OUTPUT_LESS_THAN_MINIMUM" || info.reason_name == "ERROR_INSUFFICIENT_OUTPUT_AMOUNT" || info.reason_name == "ERR_INSUFFICIENT_OUTPUT_AMOUNT" {
+                                                if !gas_saved {
+                                                    let mut gases = gas_map.write().await;
+                                                    gases.insert(order.route.clone(), tx_info.gas_used());
+                                                    std::mem::drop(gases);
+                                                }
                                                 continue 'sim_loop;
                                             }
                                             if info.reason_name == "EINSUFFICIENT_LIQUIDITY" || info.reason_name == "EPOOL_NOT_FOUND" || info.reason_name == "E_PAIR_NOT_CREATED" || info.reason_name == "ERR_INCORRECT_SWAP" || info.reason_name == "ERR_COIN_TYPE_SAME_ERROR" {

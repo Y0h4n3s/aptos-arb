@@ -339,6 +339,20 @@ pub async fn start(
 
     println!("graph service> Found {} routes", total_paths);
 
+    println!("graph service> Registering Gas consumption for transactions");
+    for (_pool, paths) in path_lookup.read().await.clone() {
+        for (in_addr, path) in paths {
+            let order = Order {
+                size: MAX_SIZE.clone(),
+                decimals: decimals(in_addr),
+                route: path.clone()
+            };
+            let r = routes.write().await;
+            r.try_send(order).unwrap();
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    }
+    println!("graph service> Starting Listener thread");
     std::thread::spawn(move || {
         let rt = Runtime::new().unwrap();
         let task_set = tokio::task::LocalSet::new();
