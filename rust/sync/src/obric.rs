@@ -176,7 +176,7 @@ impl LiquidityProvider for Obric {
 								y_address: coin_y.clone(),
 								curve_type: Uncorrelated,
 								curve: None,
-								fee_bps: amm.swap_fee_per_million.0,
+								fee_bps: 2,
 								x_amount: amm.reserve_x.value.0,
 								y_amount: amm.reserve_y.value.0,
 								x_to_y: true,

@@ -172,7 +172,7 @@ impl LiquidityProvider for Cetue {
 									  + ">",
 								x_address: coin_x.clone(),
 								y_address: coin_y.clone(),
-								fee_bps: 200,
+								fee_bps: 20,
 								curve_type: Curve::Uncorrelated,
 								curve: None,
 								x_amount: amm.coin_a.value.0,
