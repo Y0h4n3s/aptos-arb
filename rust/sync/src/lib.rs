@@ -244,7 +244,7 @@ pub enum Curve {
     Stable
 }
 
-#[derive(Debug, Clone, Hash, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq)]
 pub struct Pool {
     pub address: String,
     pub x_address: String,
@@ -258,7 +258,21 @@ pub struct Pool {
     pub provider: LiquidityProviders,
 }
 
+impl Hash for Pool {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.address.hash(state);
+        self.x_address.hash(state);
+        self.y_address.hash(state);
+        self.provider.hash(state);
+        self.curve_type.hash(state);
+    }
+}
 
+impl PartialEq for Pool {
+    fn eq(&self, other: &Self) -> bool {
+        self.address == other.address && self.x_address == other.x_address && self.y_address == other.y_address && self.provider == other.provider && self.curve_type == other.curve_type
+    }
+}
 impl EventSource for Pool {
     type Event = Self;
     fn get_event(&self) -> Self::Event {
