@@ -39,7 +39,7 @@ pub static CHECKED_COIN: Lazy<String> =  Lazy::new(|| {
 });
 
 pub static MAX_SIZE: Lazy<u64> = Lazy::new(|| {
-    std::env::var("APTOS_MAX_SIZE").unwrap_or("120".to_string()).parse().unwrap()
+    std::env::var("APTOS_MAX_SIZE").unwrap_or("100".to_string()).parse().unwrap()
 });
 
 
