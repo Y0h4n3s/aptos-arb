@@ -8,15 +8,15 @@ use aptos_sdk::move_types::language_storage::{ModuleId, StructTag, TypeTag};
 use aptos_sdk::rest_client::Client;
 use aptos_sdk::types::account_address::AccountAddress;
 use aptos_sdk::types::chain_id::ChainId;
-use aptos_sdk::types::transaction::{
-    EntryFunction, ExecutionStatus, TransactionInfo, TransactionPayload,
-};
+use aptos_sdk::types::transaction::{EntryFunction, ExecutionStatus, TransactionInfo, TransactionPayload};
 use aptos_sdk::types::LocalAccount;
 use async_std::sync::Arc;
 use garb_sync_aptos::{EventSource, LiquidityProviders, Pool, SyncConfig};
 use std::collections::{HashMap};
 use std::str::FromStr;
 use std::time::Duration;
+use aptos_sdk::rest_client::aptos_api_types::AptosErrorCode;
+use aptos_sdk::rest_client::error::RestError;
 use aptos_sdk::types::vm_status::StatusCode;
 use coingecko::CoinGeckoClient;
 use tokio::runtime::Runtime;
@@ -453,6 +453,7 @@ pub async fn transactor(routes: &mut kanal::AsyncReceiver<Order>) {
                                  .sequence_number(*seq_num)
                                  .max_gas_amount(max_gas_units)
                                  .build();
+                    
                     std::mem::drop(seq_num);
                     let signed_tx = KEY.sign_transaction(tx);
                     let sim_result = aptos_client
@@ -471,19 +472,48 @@ pub async fn transactor(routes: &mut kanal::AsyncReceiver<Order>) {
                                         }
                                     
                                         // send the transaction
-                                        let result = aptos_client.submit_bcs(&signed_tx).await;
-                                        if let Ok(_result) = result {
-                                            println!("`````````````````````` Tried Route ``````````````````````");
-                                            for (i, pool) in order.route.iter().enumerate() {
-                                                println!("{}. {}", i + 1, pool);
+                                        let mut seq_number = signed_tx.sequence_number();
+                                        let payload = signed_tx.payload();
+                                        let gas = signed_tx.max_gas_amount();
+                                        
+                                        'tx_loop: loop {
+                                            let raw_tx = tx_f.payload(payload.clone())
+                                                .sender(KEY.address())
+                                                .sequence_number(seq_number)
+                                                .max_gas_amount(gas)
+                                                .build();
+                                            let signed_tx = KEY.sign_transaction(raw_tx);
+                                            let result = aptos_client.submit_bcs(&signed_tx).await;
+                                            if let Ok(_result) = result {
+                                                println!("`````````````````````` Tried Route ``````````````````````");
+                                                for (i, pool) in order.route.iter().enumerate() {
+                                                    println!("{}. {}", i + 1, pool);
+                                                }
+                                                println!("\n\n");
+                                                let mut seq_num = sequence_number.write().await;
+                                                *seq_num += 1;
+                                                println!("seq_num: {:?}", seq_num);
+                                                break 'tx_loop;
+                                            } else {
+                                                match result.unwrap_err() {
+                                                    RestError::Api(err) => {
+                                                        if err.error.error_code as u32 == AptosErrorCode::InvalidTransactionUpdate as u32 {
+                                                            seq_number += 1;
+                                                        } else if err.error.error_code as u32 == AptosErrorCode::SequenceNumberTooOld as u32 {
+                                                            seq_number += 1;
+                                                        } else {
+                                                            println!("Error: {:?}", err);
+                                                            break 'tx_loop;
+                                                        }
+                                                    }
+                                                    err => {
+                                                        println!("Error: {:?}", err);
+                                                        break 'tx_loop;
+                                                    }
+                                                }
                                             }
-                                            println!("\n\n");
-                                            let mut seq_num = sequence_number.write().await;
-                                            *seq_num += 1;
-                                            println!("seq_num: {:?}", seq_num);
-                                        } else {
-                                            println!("error: {:?}", result.unwrap_err());
                                         }
+                                        
                                     }
                                     ExecutionStatus::OutOfGas => {}
                                     ExecutionStatus::MoveAbort {
