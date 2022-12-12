@@ -301,7 +301,15 @@ pub async fn start(
                             && p.y_address == edge.y_address
                         && p.provider == edge.provider
                     })
-                })
+                }).map(|(in_addr, path)| {
+                let mut first_pool = path.first().unwrap().clone();
+                let mut second_pool = path.get(1).unwrap().clone();
+                let mut last_pool = path.last().unwrap().clone();
+    
+                first_pool.x_to_y = first_pool.x_address == CHECKED_COIN.clone();
+                last_pool.x_to_y = last_pool.x_address == CHECKED_COIN.clone();
+                return (in_addr, vec![first_pool.clone(), second_pool.clone(), last_pool.clone()]);
+            })
                 .collect();
             let two_step = two_step_routes
                 .clone()

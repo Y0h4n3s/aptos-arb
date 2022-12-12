@@ -160,7 +160,7 @@ pub async fn transactor(routes: &mut kanal::AsyncReceiver<Order>, routes_sender:
                 *w = seq ;
                 std::mem::drop(w);
             }
-            tokio::time::sleep(Duration::from_secs(5)).await;
+            tokio::time::sleep(Duration::from_secs(2)).await;
         }
     }));
     
