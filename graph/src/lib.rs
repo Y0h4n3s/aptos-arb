@@ -303,7 +303,7 @@ pub async fn start(
                     })
                 }).map(|(in_addr, path)| {
                 let mut first_pool = path.first().unwrap().clone();
-                let mut second_pool = path.get(1).unwrap().clone();
+                let second_pool = path.get(1).unwrap().clone();
                 let mut last_pool = path.last().unwrap().clone();
     
                 first_pool.x_to_y = first_pool.x_address == CHECKED_COIN.clone();
